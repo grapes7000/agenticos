@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgenticOS Unified AI Console</title>
+  <style>
+    :root {
+      --bg: #08060a;
+      --panel: #151019;
+      --panel-2: #201625;
+      --border: #3b263f;
+      --text: #fff3fb;
+      --muted: #c9a8c0;
+      --pink: #ff4fbd;
+      --pink-2: #ff8bd6;
+      --green: #66f2ad;
+      --yellow: #ffd166;
+      --red: #ff6b8a;
+      --blue: #7cc7ff;
+      --shadow: 0 20px 80px rgba(255, 79, 189, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255, 79, 189, 0.22), transparent 32rem),
+        radial-gradient(circle at bottom right, rgba(124, 199, 255, 0.12), transparent 28rem),
+        repeating-linear-gradient(135deg, rgba(255,255,255,0.025) 0 6px, transparent 6px 15px),
+        var(--bg);
+    }
+
+    a { color: var(--pink-2); }
+
+    .shell {
+      width: min(1500px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 40px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: center;
+      margin-bottom: 22px;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 52px);
+      letter-spacing: -0.05em;
+      line-height: 0.95;
+    }
+
+    .brand p {
+      color: var(--muted);
+      margin: 10px 0 0;
+      max-width: 760px;
+    }
+
+    .status-pill {
+      border: 1px solid var(--border);
+      background: rgba(21, 16, 25, 0.85);
+      border-radius: 999px;
+      padding: 10px 14px;
+      color: var(--muted);
+      white-space: nowrap;
+      box-shadow: var(--shadow);
+    }
+
+    .status-pill strong { color: var(--green); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.05fr 1.45fr 1fr;
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(32, 22, 37, 0.92), rgba(14, 10, 17, 0.92));
+      border-radius: 24px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel h2 {
+      margin: 0 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      padding: 5px 9px;
+      color: var(--muted);
+      font-size: 12px;
+      background: rgba(255,255,255,0.04);
+    }
+
+    .tag.safe { color: var(--green); }
+    .tag.ask { color: var(--yellow); }
+    .tag.risk { color: var(--red); }
+    .tag.ai { color: var(--blue); }
+
+    .focus-card {
+      background: var(--panel-2);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .focus-card h3 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      letter-spacing: -0.04em;
+    }
+
+    .meter {
+      height: 10px;
+      border-radius: 999px;
+      background: #2d2232;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+
+    .meter > div {
+      width: 82%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--pink), var(--blue));
+    }
+
+    .evidence {
+      display: grid;
+      gap: 8px;
+    }
+
+    .evidence div, .log-row, .workflow, .suggestion {
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      border-radius: 14px;
+      padding: 11px 12px;
+    }
+
+    .evidence b { color: var(--pink-2); }
+
+    .ask-box textarea {
+      width: 100%;
+      min-height: 148px;
+      resize: vertical;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 18px;
+      background: #0d0a10;
+      color: var(--text);
+      padding: 16px;
+      font: inherit;
+      outline: none;
+    }
+
+    .ask-box textarea:focus { border-color: var(--pink); }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 12px 0;
+    }
+
+    select, button {
+      border: 1px solid rgba(255,255,255,0.11);
+      background: #120d15;
+      color: var(--text);
+      border-radius: 14px;
+      padding: 11px 12px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--pink), #8b5cf6);
+      border: none;
+      font-weight: 800;
+    }
+
+    button.secondary {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      color: var(--pink-2);
+    }
+
+    .suggestions, .workflows, .logs { display: grid; gap: 10px; }
+
+    .suggestion {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .rank {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(255,79,189,0.18);
+      color: var(--pink-2);
+      font-weight: 900;
+    }
+
+    .suggestion h3, .workflow h3 {
+      margin: 0 0 5px;
+      font-size: 15px;
+    }
+
+    .suggestion p, .workflow p, .log-row p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .workflow {
+      min-height: 106px;
+    }
+
+    .workflow .tag { margin-top: 10px; }
+
+    .wide { grid-column: span 2; }
+
+    .log-row {
+      display: grid;
+      grid-template-columns: 92px 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .log-time { color: var(--muted); font-size: 12px; }
+
+    .optimizer {
+      margin-top: 12px;
+      border: 1px solid rgba(102,242,173,0.25);
+      background: rgba(102,242,173,0.08);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .optimizer h3 { margin: 0 0 6px; color: var(--green); }
+    .optimizer p { margin: 0; color: var(--muted); }
+
+    .footer {
+      margin-top: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 1100px) {
+      .grid { grid-template-columns: 1fr; }
+      .wide { grid-column: auto; }
+    }
+
+    @media (max-width: 720px) {
+      header { align-items: flex-start; flex-direction: column; }
+      .controls, .workflow-grid { grid-template-columns: 1fr; }
+      .log-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand">
+        <h1>AgenticOS Unified AI Console</h1>
+        <p>One workflow layer for OpenWebUI, Hermes, OpenClaw, AgenticOS agents, git, Docker, and Obsidian — private by default, proactive when useful.</p>
+      </div>
+      <div class="status-pill">Mode: <strong>Local / Tailscale Safe</strong></div>
+    </header>
+
+    <section class="grid">
+      <aside class="panel">
+        <h2>Now <span class="tag ai">context detector</span></h2>
+        <div class="focus-card">
+          <h3>Unified agent workflow design</h3>
+          <span class="tag safe">82% confidence</span>
+          <div class="meter"><div></div></div>
+          <p style="color:var(--muted);margin:0;line-height:1.45">Looks like you are designing a command-center interface that coordinates Hermes, OpenWebUI, OpenClaw, and AgenticOS agents.</p>
+        </div>
+        <div class="evidence">
+          <div><b>Git</b><br />AgenticOS repo active on branch main.</div>
+          <div><b>Obsidian</b><br />Latest AI-LEARN notes mention OpenWebUI knowledge and note policy.</div>
+          <div><b>Services</b><br />OpenWebUI, Homepage, Portainer, and monitoring are relevant context sources.</div>
+        </div>
+      </aside>
+
+      <section class="panel wide ask-box">
+        <h2>Ask / Route <span class="tag safe">dry-run default</span></h2>
+        <textarea>Help me continue what I’m working on. Detect the current project, suggest 3 safe next actions, and ask before doing risky steps.</textarea>
+        <div class="controls">
+          <select aria-label="Target agent">
+            <option>Auto-route</option>
+            <option>Hermes</option>
+            <option>OpenWebUI</option>
+            <option>OpenClaw</option>
+            <option>AgenticOS agent</option>
+          </select>
+          <select aria-label="Safety level">
+            <option>Read-only</option>
+            <option>Dry-run</option>
+            <option>Write local files</option>
+            <option>Restart service — confirm</option>
+          </select>
+          <button>Prompt Unified AI</button>
+        </div>
+        <div class="suggestions">
+          <div class="suggestion">
+            <div class="rank">1</div>
+            <div>
+              <h3>Build the context detector CLI</h3>
+              <p>Read git status, latest AgenticOS notes, Docker health, and allowlisted directories. No OpenWebUI DB access yet.</p>
+              <span class="tag safe">safe local write</span>
+            </div>
+          </div>
+          <div class="suggestion">
+            <div class="rank">2</div>
+            <div>
+              <h3>Add unified SQLite logging tables</h3>
+              <p>Track task durations, failures, accepted suggestions, and optimization candidates.</p>
+              <span class="tag safe">safe schema migration</span>
+            </div>
+          </div>
+          <div class="suggestion">
+            <div class="rank">3</div>
+            <div>
+              <h3>Prepare OpenWebUI chat connector design</h3>
+              <p>Make it opt-in, read-only, and redacted before touching chats.</p>
+              <span class="tag ask">needs opt-in</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <h2>Workflows <span class="tag">one-click</span></h2>
+        <div class="workflow-grid">
+          <div class="workflow">
+            <h3>What am I working on?</h3>
+            <p>Scan safe context and suggest next actions.</p>
+            <span class="tag safe">read-only</span>
+          </div>
+          <div class="workflow">
+            <h3>Continue work</h3>
+            <p>Use latest handoff, git status, and task list.</p>
+            <span class="tag safe">dry-run</span>
+          </div>
+          <div class="workflow">
+            <h3>OpenClaw prep</h3>
+            <p>Pack context for a sandboxed coding task.</p>
+            <span class="tag safe">local</span>
+          </div>
+          <div class="workflow">
+            <h3>Git checkpoint</h3>
+            <p>Scan for secrets, then commit local changes.</p>
+            <span class="tag ask">confirm</span>
+          </div>
+          <div class="workflow">
+            <h3>Health check</h3>
+            <p>Run AgenticOS health/security summary.</p>
+            <span class="tag safe">read-only</span>
+          </div>
+          <div class="workflow">
+            <h3>Optimize</h3>
+            <p>Analyze repeated failures and slow workflows.</p>
+            <span class="tag ai">learn</span>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel wide">
+        <h2>Logs + Optimizer <span class="tag ai">performance memory</span></h2>
+        <div class="logs">
+          <div class="log-row">
+            <span class="log-time">2 min ago</span>
+            <p><strong>Hermes</strong> wrote unified interface design doc and dashboard prototype.</p>
+            <span class="tag safe">ok</span>
+          </div>
+          <div class="log-row">
+            <span class="log-time">12 min ago</span>
+            <p><strong>AgenticOS</strong> generated latest AI-LEARN / READ-ME notes after policy update.</p>
+            <span class="tag safe">ok</span>
+          </div>
+          <div class="log-row">
+            <span class="log-time">earlier</span>
+            <p><strong>OpenWebUI</strong> DB readback was blocked by safety guard; future connector should avoid direct DB reads without opt-in.</p>
+            <span class="tag ask">blocked</span>
+          </div>
+        </div>
+        <div class="optimizer">
+          <h3>Optimization suggestion</h3>
+          <p>Start with read-only context detection and SQLite logging before adding OpenWebUI chat reading. This gives proactive suggestions without touching risky data sources.</p>
+        </div>
+      </section>
+    </section>
+
+    <p class="footer">Prototype only — wire this to <code>agentos-unified context|suggest|route|logs|optimize</code> in Phase 2.</p>
+  </main>
+</body>
+</html>
