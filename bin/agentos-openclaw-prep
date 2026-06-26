@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec "$HOME/AgenticOS/scripts/openclaw_prepare.sh"

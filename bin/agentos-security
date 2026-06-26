@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$HOME/AgenticOS"
+export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+export AGENTOS_HOME="${AGENTOS_HOME:-$HOME/AgenticOS}"
+python3 agents/security_audit.py "$@"

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "${AGENTOS_DIR:-$HOME/AgenticOS}"
+export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+python3 agents/fix_status.py

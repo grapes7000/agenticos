@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$HOME/AgenticOS"
+export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+export AGENTOS_MODEL="${AGENTOS_MODEL:-qwen2.5-coder:7b}"
+case "${1:-help}" in
+  work-cycle)
+    python3 agents/work_cycle.py
+    ;;
+  help)
+    if [ -x "$HOME/AgenticOS/bin/agentos.legacy" ]; then
+      "$HOME/AgenticOS/bin/agentos.legacy" help || true
+    fi
+    echo ""
+    echo "Extra AgenticOS commands:"
+    echo "  work-cycle   Run one safe AI project work cycle and write a patch plan"
+    ;;
+  *)
+    if [ -x "$HOME/AgenticOS/bin/agentos.legacy" ]; then
+      "$HOME/AgenticOS/bin/agentos.legacy" "$@"
+    else
+      echo "Unknown command: ${1:-help}"
+      echo "Run: agentos help"
+      exit 1
+    fi
+    ;;
+esac

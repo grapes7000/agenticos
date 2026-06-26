@@ -1,0 +1,11 @@
+# RSS feeds for daily briefing. Add/remove feeds anytime.
+feeds:
+  ai:
+    - "https://news.google.com/rss/search?q=artificial+intelligence"
+    - "https://news.google.com/rss/search?q=local+LLM+open+source+AI"
+  crypto:
+    - "https://news.google.com/rss/search?q=bitcoin+ethereum+crypto"
+  linux:
+    - "https://news.google.com/rss/search?q=linux+mint+ubuntu+desktop"
+  personal_projects:
+    - "https://news.google.com/rss/search?q=agentic+ai+desktop+automation"

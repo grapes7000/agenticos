@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$HOME/AgenticOS"
+export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+export AGENTOS_MODEL="${AGENTOS_MODEL:-qwen2.5-coder:7b}"
+python3 agents/work_cycle.py

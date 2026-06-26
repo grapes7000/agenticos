@@ -1,0 +1,8 @@
+{
+  "agentos_home": "/home/lakota/AgenticOS",
+  "obsidian_vault": "/home/lakota/vault",
+  "default_model": "qwen2.5-coder:7b",
+  "dry_run_only": true,
+  "blocked_path_terms": ["wallet", "seed", "mnemonic", "private", "keystore", ".ssh", "id_rsa", "password", "recovery", "secret"],
+  "allowed_scan_roots": ["/home/lakota/Downloads", "/home/lakota/Desktop", "/home/lakota/Documents"]
+}

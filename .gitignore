@@ -1,0 +1,56 @@
+# Python/runtime
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Secrets / local env
+.env
+*.env
+.env.*
+!.env.example
+!.env.sample
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Databases and runtime state
+data/*.sqlite
+data/**/*.sqlite
+data/db/
+data/handoffs/*.json
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs, generated run output, caches
+logs/
+*.log
+*.tmp
+*.bak
+*.backup.*
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+.cache/
+
+# Generated reports / iterative run artifacts
+iterative-fixes/runs/
+bugs/*-bug-hunt.md
+
+# Local OpenClaw sandbox context copies
+openclaw-sandbox/context/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

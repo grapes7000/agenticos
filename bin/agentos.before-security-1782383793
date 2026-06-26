@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$HOME/AgenticOS"
+export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+export AGENTOS_HOME="${AGENTOS_HOME:-$HOME/AgenticOS}"
+export AGENTOS_MODEL="${AGENTOS_MODEL:-qwen2.5-coder:7b}"
+
+LEGACY_AGENTOS="/home/lakota/AgenticOS/bin/agentos.before-security-1782383713"
+
+case "${1:-help}" in
+  security)
+    shift || true
+    exec "$HOME/AgenticOS/bin/agentos-security" "$@"
+    ;;
+  security-summary)
+    shift || true
+    exec "$HOME/AgenticOS/bin/agentos-security-summary" "$@"
+    ;;
+  build-quality)
+    shift || true
+    exec "$HOME/AgenticOS/bin/agentos-build-quality" "$@"
+    ;;
+  security-full|audit)
+    shift || true
+    exec "$HOME/AgenticOS/bin/agentos-security-full" "$@"
+    ;;
+  help)
+    if [[ -n "$LEGACY_AGENTOS" && -x "$LEGACY_AGENTOS" ]]; then
+      "$LEGACY_AGENTOS" help || true
+    fi
+    echo ""
+    echo "Security/quality commands:"
+    echo "  security          Collect a system security + health audit"
+    echo "  build-quality     Check AgenticOS script/build quality"
+    echo "  security-summary  Use local Qwen/Ollama to summarize latest audit reports"
+    echo "  security-full     Run security + build-quality + summary"
+    echo "  audit             Alias for security-full"
+    ;;
+  *)
+    if [[ -n "$LEGACY_AGENTOS" && -x "$LEGACY_AGENTOS" ]]; then
+      exec "$LEGACY_AGENTOS" "$@"
+    else
+      echo "Unknown command: ${1:-help}"
+      echo "Run: agentos help"
+      exit 1
+    fi
+    ;;
+esac

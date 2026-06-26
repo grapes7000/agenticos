@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$HOME/AgenticOS"
+export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+cmd="${1:-help}"
+shift || true
+case "$cmd" in
+  help)
+    cat <<HELP
+AgenticOS commands:
+  morning             Run the existing morning workflow if present
+  layer3              Run memory index, health, evaluation, project guardian, handoff, OpenClaw context pack
+  index               Index Obsidian notes into SQLite memory chunks
+  search QUERY        Search AgenticOS memory/Obsidian index
+  evaluate            Run guard/evaluation report
+  health              Run health watchdog report
+  openclaw-prep       Prepare safe OpenClaw sandbox/context pack
+  openclaw-context    Refresh OpenClaw context pack only
+  handoff             Write latest handoff report
+  project             Run project guardian
+  doctor              Basic status check
+HELP
+    ;;
+  morning)
+    if [ -x scripts/morning_run.sh ]; then scripts/morning_run.sh; else echo "scripts/morning_run.sh missing"; exit 1; fi
+    ;;
+  layer3) scripts/layer3_run.sh ;;
+  index) python3 tools/ensure_layer3_schema.py && python3 tools/index_obsidian_memory.py ;;
+  search) python3 tools/search_memory.py "$@" ;;
+  evaluate) python3 agents/evaluator.py ;;
+  health) python3 agents/health_watchdog.py ;;
+  openclaw-prep) scripts/openclaw_prepare.sh ;;
+  openclaw-context) scripts/openclaw_context_pack.sh ;;
+  handoff) python3 agents/handoff_writer.py ;;
+  project) python3 agents/project_guardian.py ;;
+  doctor)
+    echo "AgenticOS: $HOME/AgenticOS"
+    echo "Vault: $OBSIDIAN_VAULT"
+    test -f data/db/agent_os.sqlite && echo "DB: present" || echo "DB: missing"
+    command -v ollama >/dev/null && ollama list || echo "ollama not found"
+    command -v hermes >/dev/null && hermes cron list || echo "hermes not found"
+    command -v qwen >/dev/null && qwen --version || echo "qwen not found"
+    command -v openclaw >/dev/null && openclaw --version || echo "openclaw not found"
+    ;;
+
+  test)
+    python3 agents/system_test_runner.py
+    ;;
+  bug-hunt|bugs)
+    python3 agents/bug_hunter.py
+    ;;
+  fix-cycle|iterate)
+    python3 agents/iterative_fix_cycle.py
+    ;;
+  fix-status)
+    python3 agents/fix_status.py
+    ;;
+
+  *) echo "Unknown command: $cmd"; echo "Run: agentos help"; exit 1 ;;
+esac
