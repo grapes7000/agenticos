@@ -1,37 +1,42 @@
 # AI Handoff
 
-> Keep this short and current. It should let a fresh chat or coding assistant understand the project without reading old conversation history.
+## Project
+
+AgenticOS is a Python Linux control utility that turns recurring shell diagnostics/workflows into named read-only checks and later explicit actions, with human-readable output through one `agent` CLI.
 
 ## Current state
-- Project phase: [TO FILL]
-- Current release target: [TO FILL]
-- Last completed task: [TO FILL]
-- Active task: [TO FILL or None]
 
-## What currently works
-- [TO FILL]
+Planning is complete through Checkpoint 5. No implementation code has been written yet. The active task is `BUILD-001A`.
 
-## Important architecture facts
-- [TO FILL]
+## Architecture that must be preserved
 
-## Recent changes
-- [TO FILL]
+- shared `Status` + `CheckResult` model;
+- shared subprocess runner;
+- checks return data and do not print;
+- checks are read-only;
+- Rich CLI renders results;
+- actions come later and are explicitly separate;
+- deterministic code decides system facts/status;
+- future TUI/Qt/AI interfaces consume the same Python backend rather than parsing CLI text.
 
-## Known issues / blockers
-- [TO FILL or None]
+## Development workflow
 
-## Verification status
-- Last checks run: [TO FILL]
-- Result: [TO FILL]
-- Anything not verified: [TO FILL]
+The developer wants local Qwen to write small proof-of-working-code slices. For the first five checkpoints, prompts should be self-contained enough that Qwen does not need uploaded repo files or planning docs. The developer will finish all lettered tasks in one checkpoint before asking ChatGPT for a combined review and plain-language code explanation.
 
-## Files a new AI should read first
-1. `docs/ACTIVE_TASK.md`
-2. [directly relevant file]
-3. [directly relevant project doc if needed]
+When asked for a Qwen prompt, include exact files, interfaces, constraints, tests, delivery format, and explicit non-goals. Do not give Qwen the whole future roadmap unless needed.
 
-## Next recommended step
-[TO FILL]
+## Current checkpoint
 
-## Do not do yet
-- [Deferred/out-of-scope work]
+Checkpoint 1: package/CLI bootstrap, result model, command runner, two network checks, two system checks, Rich `agent status`, and tests.
+
+## Important future requirement
+
+Checkpoint 2 network diagnostics must determine whether traffic is actually using Mullvad and distinguish local Mullvad VPN/tunnel routing from a Tailscale-provided Mullvad exit path when evidence supports that distinction.
+
+## Source of truth
+
+- `TASKS.md` — task decomposition.
+- `docs/03_ARCHITECTURE.md` — architecture.
+- `docs/DECISIONS.md` — durable decisions.
+- `docs/ACTIVE_TASK.md` — current slice.
+- `docs/CURRENT_STATE.md` — current milestone/state.
