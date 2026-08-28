@@ -1,39 +1,34 @@
 # Active Task
 
-> Exactly one task belongs here. Replace this template with the current task copied from `TASKS.md`. Clear/replace it only after the current task is finished.
+## BUILD-001A — Bootstrap Python package and CLI entry point
 
-## [BUILD/EDIT/FIX/CHORE]-### — [TITLE]
+**Checkpoint:** 1 — Core framework + `agent status`
 
-**Status:** ACTIVE
+**Status:** TODO
 
-### Goal
-[TO FILL]
+## Outcome
 
-### Why this task exists
-[TO FILL]
+Create the minimal Python packaging/CLI skeleton required for later AgenticOS checks. At the end of this slice, an editable install in a virtual environment should expose an `agent` command that can display help/version and exit cleanly.
 
-### Relevant existing files
-- [path]
+## Scope
 
-### Files expected to change
-- [path]
+Expected files:
 
-### Acceptance criteria
-- [ ] [TO FILL]
+- `pyproject.toml`
+- `agenticos/__init__.py`
+- `agenticos/cli.py`
 
-### Verification commands
-```bash
-[TO FILL]
-```
+Do not implement checks, Rich status rendering, subprocess helpers, Tailscale, disk, networking, or future architecture in this task.
 
-### Constraints
-- Do not work outside this task.
-- Preserve unrelated behavior.
-- Reuse existing code where appropriate.
-- Do not add dependencies unless this task explicitly requires them.
+## Acceptance criteria
 
-### Current checkpoint
-[Example: BUILD-001A, or N/A]
+- project installs in a venv/editable mode;
+- `agent --help` works;
+- a simple version command/flag works if included in the chosen minimal CLI design;
+- package imports without side effects;
+- no diagnostic logic yet;
+- implementation is small enough to understand completely before BUILD-001B.
 
-### Notes / errors
-[Paste only relevant current information here]
+## Development method
+
+Ask ChatGPT for a **self-contained Qwen prompt for BUILD-001A**. Give that prompt to Qwen without repository files. Paste only the requested output into the exact paths, run the proof commands from the prompt, and commit the slice when it passes.
