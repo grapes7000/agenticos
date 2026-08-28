@@ -1,33 +1,59 @@
-# Testing and Verification
+# Testing
 
-## Standard checks
+## Principle
 
-Fill in the commands that apply to this project.
+AgenticOS should be testable without depending on the machine running the test. Most check tests therefore mock the shared command runner and feed deterministic stdout/stderr/exit-code fixtures into parsing/classification logic.
 
-```bash
-# Unit tests
+## Required coverage pattern
 
-# Integration tests
+For each check, add focused tests for the states that matter to the user:
 
-# Lint
+- healthy/normal;
+- degraded/warning;
+- broken/unavailable;
+- required command missing;
+- timeout or command failure where relevant;
+- malformed/unexpected output where parsing exists.
 
-# Type checking
+Not every check needs every case, but every meaningful classification branch should be exercised.
 
-# Build
+## Runner tests
+
+The command runner itself should cover:
+
+- successful command;
+- nonzero exit status;
+- missing executable;
+- timeout;
+- permission failure if represented explicitly.
+
+## What not to do
+
+- Do not require Tailscale, Mullvad, Docker, Ollama, or Open WebUI to be installed for the unit suite.
+- Do not hit public APIs in unit tests.
+- Do not mutate system state to create test conditions.
+- Do not disable tests because the local machine has a different configuration.
+
+## Real-machine checkpoint proof
+
+Mocks prove logic. Each checkpoint also needs one manual smoke test on the actual machine:
+
+```text
+Checkpoint 1: agent status
+Checkpoint 2: agent network
+Checkpoint 3: agent system
+Checkpoint 4: agent docker
+Checkpoint 5: agent ollama
 ```
 
-## Manual smoke test
+The manual run should never be the only proof of correctness.
 
-Document the shortest set of steps that proves the app's critical path still works.
+## Default test command
 
-1. Start the application.
-2. ...
+Once pytest is introduced:
 
-## Release verification
+```bash
+python -m pytest -q
+```
 
-- [ ] Automated tests pass.
-- [ ] Lint/type checks pass or exceptions are documented.
-- [ ] Production build succeeds.
-- [ ] Manual critical-path smoke test passes.
-- [ ] Fresh-install or packaging path tested when relevant.
-- [ ] No secrets or local-only files are staged for commit.
+Each self-contained Qwen prompt should also include the smallest focused test command for the slice it implements.
