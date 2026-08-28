@@ -1,77 +1,68 @@
-# MyNewApp — guided chat-first app starter
+# AgenticOS
 
-A reusable starter for building apps with ChatGPT, Ollama, Claude chat, or any other model that mainly gives you text/code in conversation.
+AgenticOS is a personal Linux control layer that turns accumulated shell commands, diagnostic recipes, and multi-command workflows into named Python **checks** and **actions** with clear human explanations.
 
-This repo is deliberately **human-operated**: the AI helps plan, write, review, and explain code, while you control the files, terminal, tests, Git branches, commits, pushes, and pull requests.
+The goal is not to replace Linux or hide it. The goal is to make the parts of Linux I repeatedly use easier to inspect, understand, and operate.
 
-## Core workflow
+Instead of remembering commands such as `systemctl`, `ip rule`, `docker inspect`, `tailscale status`, `df`, or project-specific doctor commands, AgenticOS will expose stable commands such as:
 
-1. Define the idea.
-2. Fill the planning templates with an AI after discussing the project.
-3. Break v0.1 into small BUILD tasks.
-4. Put exactly one task in `docs/ACTIVE_TASK.md`.
-5. Create a Git branch for that task.
-6. Ask an AI for one small implementation slice.
-7. Paste the code into the intended repo files.
-8. Run checks and tests.
-9. Debug failures in a bounded way.
-10. Review the diff and have an AI review/explain it.
-11. Commit, push, open a PR, merge, and update project state.
-12. Repeat.
+```bash
+agent status
+agent network
+agent system
+agent docker
+agent ollama
+agent dev
+agent homelab
+```
 
-The rule is: **plan broadly once; implement narrowly forever.**
+The CLI is the first complete product. Later, the same Python backend may power a terminal UI, a PySide6/Qt GUI, local-AI tools, and lightweight background health monitoring.
+
+## Core design
+
+- **Checks are read-only.** They inspect the computer and return structured facts.
+- **Actions are separate.** Any operation that changes state is explicit and introduced later.
+- **Linux facts are deterministic.** Python decides whether a service, route, container, disk, or endpoint is healthy.
+- **Human explanations are first-class.** Results should say what happened, why it matters, and what to inspect next.
+- **UI code never owns system logic.** CLI/TUI/GUI/AI layers consume the same Python result objects.
+- **Small slices over giant AI rewrites.** Local chat models write narrowly scoped pieces that can be pasted, run, and understood.
+
+## Development workflow
+
+This repository is human-operated. Qwen or another local chat model writes one small slice from a self-contained prompt. The human pastes it into the named file and runs the specified checks. A full checkpoint is completed before ChatGPT reviews the combined code, catches design problems, and explains how the implementation works.
+
+The first five checkpoints are planned in [`TASKS.md`](TASKS.md):
+
+1. Core result model, command runner, four baseline checks, and `agent status`.
+2. Network/VPN intelligence, including Mullvad route-source detection.
+3. Complete local system-health diagnostics.
+4. Docker and self-hosting diagnostics.
+5. Ollama/local-AI diagnostics.
+
+After those, the CLI continues through development tools, homelab tools, explicit actions, guided troubleshooting, configuration, machine-readable output, packaging, and CLI v1.0. TUI/Qt work begins only after the CLI backend is complete enough to be the source of truth.
 
 ## Start here
 
-Read [`START_HERE.md`](START_HERE.md) and follow it in order. It is the tutorial for using this repository.
+Read [`START_HERE.md`](START_HERE.md), then begin with `BUILD-001A` in [`TASKS.md`](TASKS.md).
 
-## Repository map
+## Planned package shape
+
+The exact structure may evolve, but the intended direction is intentionally small:
 
 ```text
-.
-├── README.md
-├── START_HERE.md
-├── AGENTS.md
-├── TASKS.md
-├── app/
-├── docs/
-│   ├── 00_IDEA.md
-│   ├── 01_PROJECT_BRIEF.md
-│   ├── 02_REQUIREMENTS.md
-│   ├── 03_ARCHITECTURE.md
-│   ├── 04_BUILD_PLAN.md
-│   ├── ACTIVE_TASK.md
-│   ├── CURRENT_STATE.md
-│   ├── AI_HANDOFF.md
-│   ├── DECISIONS.md
-│   ├── BUGS.md
-│   ├── TESTING.md
-│   └── RELEASE_CHECKLIST.md
-├── prompts/
-│   ├── 01-discuss-idea.md
-│   ├── 02-fill-planning-docs.md
-│   ├── 03-create-build-plan.md
-│   ├── 04-write-small-slice.md
-│   ├── 05-review-code.md
-│   ├── 06-debug-failure.md
-│   └── 07-update-handoff.md
-├── guides/
-│   ├── WORKFLOW.md
-│   ├── TERMINAL.md
-│   ├── GIT.md
-│   └── AI_CHAT_WORKFLOW.md
-└── scripts/
-    ├── preflight.sh
-    └── check.sh
+agenticos/
+├── models.py
+├── runner.py
+├── cli.py
+└── checks/
+    ├── network.py
+    ├── system.py
+    ├── docker.py
+    └── ollama.py
 ```
 
-## Task types
+Later additions such as `actions/`, TUI, Qt, configuration, and AI integration should be added only when their checkpoint requires them.
 
-- `BUILD-###` — add one coherent, runnable/testable capability.
-- `EDIT-###` — make one small surgical change.
-- `FIX-###` — repair one understood defect at its root cause.
-- `CHORE-###` — bounded tooling, docs, packaging, or maintenance work.
+## Safety boundary
 
-## What this starter is not
-
-It is not an autonomous agent controller. If you want Codex, Claude Code, OpenCode, Aider, Hermes, or another tool-using coding agent to operate the repository under an automated task/check/review controller, use `VibeLab-starter` instead.
+A function under `checks/` may inspect state but must not intentionally modify the machine. Restarting services, deleting data, changing routes, installing packages, cleaning caches, or otherwise mutating state belongs to a future explicit action layer with appropriate confirmation and safety rules.
