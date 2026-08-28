@@ -1,104 +1,101 @@
-# AI Chat Rules
+# AI Rules for AgenticOS
 
-These rules apply whenever an AI is helping with this repository, including ChatGPT, Ollama chat, Claude chat, or a coding assistant.
+These rules apply when ChatGPT, Qwen, Ollama chat, Claude chat, or another AI helps with this repository.
 
 ## Authority order
 
 1. Latest explicit user instruction.
 2. `docs/ACTIVE_TASK.md`.
-3. This file.
-4. Approved project docs and decisions.
-5. Existing code patterns.
+3. `TASKS.md` checkpoint/task contract.
+4. This file.
+5. `docs/03_ARCHITECTURE.md` and `docs/DECISIONS.md`.
+6. Existing code patterns.
 
-## Before writing code
+## Development model
 
-- Read `docs/ACTIVE_TASK.md`.
-- Read only the project docs and source files needed for that task.
-- Inspect existing implementation before proposing replacements.
-- Keep the context narrow; do not request the whole repo without a reason.
-- For a non-trivial change, give a short plan first.
+AgenticOS deliberately uses two AI roles:
 
-## One-task rule
+- **Qwen/local chat model:** writes one very small implementation slice from a self-contained prompt.
+- **ChatGPT:** defines the detailed prompt when requested, then reviews and explains the completed checkpoint after all lettered tasks are implemented and tested.
 
-Work on exactly one BUILD, EDIT, FIX, or CHORE task at a time.
+The human controls files, terminal commands, tests, Git, checkpoint advancement, and acceptance.
 
-Do not choose the next task, mark tasks DONE, expand the roadmap, or silently change product/architecture decisions. The human controls task lifecycle and Git.
+## One-slice rule for Qwen
 
-If a task is too large for one safe implementation response, propose named checkpoints such as `BUILD-003A`, `BUILD-003B`, and `BUILD-003C`.
+Implement exactly the requested lettered BUILD task or smaller sub-slice. Do not automatically continue to the next task.
+
+For Checkpoints 1–5, the prompt should contain enough technical context that Qwen does **not** need uploaded repository files/documents for proof-of-working-code tasks. If compatibility with existing code is required, provide the exact public interface or the smallest relevant code excerpt in the prompt rather than asking Qwen to inspect the whole repository.
+
+## Qwen delivery format
+
+For each requested slice, return:
+
+1. exact repository path;
+2. `NEW FILE`, `COMPLETE REPLACEMENT`, or tightly scoped `TARGETED EDIT`;
+3. complete copy-pastable code for the requested file(s);
+4. a short explanation;
+5. exact focused test/proof commands;
+6. no unrelated future implementation.
+
+Never claim a command was run unless the AI actually has tool access and ran it or the user supplied the output.
+
+## Architecture boundaries
+
+- Checks are read-only.
+- Checks return structured Python data and do not print.
+- External commands go through the shared command runner once it exists.
+- CLI/rendering code owns terminal presentation.
+- Do not put Rich markup or UI behavior inside checks.
+- Do not add `sudo`, package installs, service restarts, Docker mutation, route changes, deletion, cleanup, or other intentional state changes to Checkpoints 1–5.
+- Do not add a generic plugin framework, daemon, TUI, Qt GUI, or AI orchestration unless the active task explicitly reaches that stage.
+- Deterministic code owns factual health classification; an LLM may later explain those facts.
 
 ## Implementation rules
 
-- Prefer minimal targeted changes over broad rewrites.
-- Preserve unrelated working behavior.
-- Reuse existing utilities/components/conventions where appropriate.
-- Do not create `final`, `final2`, `fixed`, `new`, `backup`, or parallel source implementations.
-- Do not add dependencies, change APIs/storage/auth/security/deployment, or redesign architecture unless the active task explicitly requires it.
-- Do not leave abandoned commented-out code or dead implementations.
-- Do not disable tests/type checks/security controls to make checks pass.
+- Prefer the smallest correct implementation over abstraction for hypothetical future needs.
+- Preserve established public interfaces from completed tasks.
+- Add a dependency only when the checkpoint explicitly calls for it or the human approves it.
+- Use finite timeouts for external commands/network calls.
+- Prefer exit codes and machine-readable output over parsing human/decorative output.
+- Normal environmental differences should return understandable states, not uncaught tracebacks.
+- Do not create parallel files named `new`, `fixed`, `final`, `backup`, etc.
 - Never expose or commit secrets.
-- Do not access outside the repository or use `sudo` unless explicitly authorized.
 
-## Code delivery format for chat models
+## Testing
 
-For each proposed change, provide:
+Unit tests should normally mock command execution and network requests so test results do not depend on whether Tailscale, Mullvad, Docker, Ollama, or Open WebUI happen to be active on the developer machine.
 
-1. exact repository path;
-2. `NEW FILE`, `COMPLETE REPLACEMENT`, or `TARGETED EDIT`;
-3. code/content to paste;
-4. short explanation of what it does;
-5. exact check/test commands the human should run.
+A task is not done just because its happy path runs once. Test the meaningful classifications and expected failure paths named in `TASKS.md`.
 
-Never claim a command was run unless the user supplied its output or the AI actually has tool access and ran it.
+## Checkpoint review
 
-## Debugging
+When all lettered tasks in a checkpoint are complete, stop before beginning the next checkpoint. The checkpoint review should inspect:
 
-1. Start from the exact failure/output.
-2. Identify the likely root cause.
-3. Apply the smallest repair.
-4. Rerun the original failing command.
-5. Run relevant regression checks.
+- full diff against the checkpoint base;
+- all test results;
+- real smoke-test output for the checkpoint command;
+- architecture fit;
+- brittle parsing or environment assumptions;
+- acceptance criteria;
+- code the human should understand before accepting it.
 
-After two materially different failed approaches, stop and reassess assumptions/root cause rather than continuing speculative edits.
-
-## Verification and review
-
-Before a task is accepted:
-
-- inspect `git diff`;
-- run relevant tests/checks;
-- run `./scripts/check.sh`;
-- compare results against every acceptance criterion;
-- have the change reviewed when practical;
-- explain important code so the human understands what is being accepted.
+After necessary fixes and passing checks, the human may merge and advance.
 
 ## Git safety
 
-The human controls Git lifecycle. An AI may explain commands, but must not assume permission to push, merge, force-push, rewrite history, delete branches, reset hard, or clean files.
+The human controls Git lifecycle. Do not assume permission to push, merge, force-push, reset, clean, delete branches, or rewrite history.
 
-The standard task flow is branch -> edit -> diff -> check -> review -> stage -> commit -> push -> PR -> merge -> update state.
+Recommended structure is one branch per checkpoint with small commits for each lettered task.
 
-## Documentation
+## Documentation updates
 
-Update durable docs only when relevant:
+Update durable docs when state changes:
 
-- `docs/CURRENT_STATE.md` — what works now and what comes next.
-- `docs/AI_HANDOFF.md` — context another chat/agent needs.
-- `docs/DECISIONS.md` — durable product/architecture decisions.
-- `docs/BUGS.md` — unresolved known defects.
-- `docs/CHANGELOG.md` — user-visible changes.
+- `docs/CURRENT_STATE.md`
+- `docs/AI_HANDOFF.md`
+- `docs/DECISIONS.md` when a durable decision changes
+- `docs/BUGS.md` for unresolved defects
+- `docs/CHANGELOG.md` for user-visible completed capability
+- `docs/ACTIVE_TASK.md` for the current lettered task
 
 Do not turn documentation into a transcript.
-
-## Completion report
-
-At the end of a task report:
-
-- Task
-- Changed
-- Files
-- Checks run/results
-- Acceptance criteria status
-- Remaining concerns/unverified items
-- Suggested Git next step
-
-Then stop. Do not begin the next task automatically.
