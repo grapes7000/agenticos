@@ -19,13 +19,19 @@ ASSET_VIEW = XDG / "chatgpt-assets"
 FILE_ID = re.compile(r"\bfile[-_]([A-Za-z0-9]{8,})\b", re.I)
 MAX_TEXT = 2_000_000
 CONTENT_HASH_VERSION = "analysis-v1"
-CONTENT_HASH_VERSION = "analysis-v1"
 EXT = {
     "image/jpeg":".jpg","image/png":".png","image/gif":".gif","image/webp":".webp","image/heif":".heif",
     "application/pdf":".pdf","application/json":".json","application/zip":".zip",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document":".docx",
     "audio/x-wav":".wav","audio/wav":".wav","audio/x-m4a":".m4a","video/mp4":".mp4",
     "text/plain":".txt","text/csv":".csv","text/x-shellscript":".sh","text/x-script.python":".py","text/x-c":".c",
+}
+CONTROL_EXPORT_FILES = {
+    "chat.html", "conversations.json", "shared_conversations.json", "user.json",
+    "message_feedback.json", "model_comparisons.json", "group_chats.json",
+}
+ATTACHMENT_SUFFIXES = set(EXT.values()) | {
+    ".jpeg", ".heic", ".md", ".yaml", ".yml", ".js", ".ts", ".cpp", ".h", ".hpp", ".log", ".rtf",
 }
 
 
@@ -54,6 +60,11 @@ def ensure_schema(db: Path):
         CREATE TABLE IF NOT EXISTS assets(
           asset_id TEXT PRIMARY KEY,source_path TEXT NOT NULL,source_sha256 TEXT NOT NULL,recovered_path TEXT,detected_mime TEXT NOT NULL,
           recovered_ext TEXT NOT NULL,size_bytes INTEGER NOT NULL,extracted_text TEXT,extraction_status TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS asset_aliases(
+          alias_id TEXT PRIMARY KEY,asset_id TEXT NOT NULL REFERENCES assets(asset_id),source_path TEXT NOT NULL,
+          source_sha256 TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_asset_aliases_asset ON asset_aliases(asset_id);
+        CREATE INDEX IF NOT EXISTS idx_asset_aliases_sha ON asset_aliases(source_sha256);
         CREATE TABLE IF NOT EXISTS asset_references(
           ref_hash TEXT PRIMARY KEY,asset_id TEXT NOT NULL REFERENCES assets(asset_id),conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id),
           node_id TEXT NOT NULL,message_id TEXT,original_name TEXT,context_text TEXT,metadata_json TEXT NOT NULL DEFAULT '{}');
@@ -66,6 +77,8 @@ def ensure_schema(db: Path):
         CREATE TABLE IF NOT EXISTS archive_imports(
           import_id TEXT PRIMARY KEY,source_path TEXT NOT NULL,source_sha256 TEXT,prepared_path TEXT NOT NULL,imported_at TEXT NOT NULL,metrics_json TEXT NOT NULL);
         """)
+        c.execute("""INSERT OR IGNORE INTO asset_aliases(alias_id,asset_id,source_path,source_sha256,updated_at)
+                     SELECT asset_id,asset_id,source_path,source_sha256,updated_at FROM assets""")
 
 
 def sha(path: Path):
@@ -80,20 +93,8 @@ def digest_json(v: Any):
 
 
 def conversation_digest(conv: dict[str, Any]) -> str:
-    """Hash only analysis-relevant conversation content, not volatile export metadata."""
-    material = {
-        "title": conv.get("title") or "Untitled",
-        "messages": flatten_conversation(conv),
-    }
-    return digest_json(material)[0]
-
-
-def conversation_digest(conv: dict[str, Any]) -> str:
-    """Hash only analysis-relevant conversation content, not volatile export metadata."""
-    material = {
-        "title": conv.get("title") or "Untitled",
-        "messages": flatten_conversation(conv),
-    }
+    """Hash analysis-relevant transcript content, not volatile export metadata."""
+    material={"title":conv.get("title") or "Untitled","messages":flatten_conversation(conv)}
     return digest_json(material)[0]
 
 
@@ -164,53 +165,25 @@ def ingest(db: Path,source: Path):
                 if not isinstance(conv,dict): continue
                 cid=conv.get("id") or conv.get("conversation_id")
                 if not cid: continue
-
-                raw=json.dumps(conv,ensure_ascii=False,sort_keys=True,separators=(",",":"))
-                d=conversation_digest(conv)
-                row=c.execute(
-                    "SELECT raw_json,content_sha256,content_hash_version FROM conversations WHERE conversation_id=?",
-                    (cid,)
-                ).fetchone()
-
-                title=conv.get("title") or "Untitled"
-                created=iso(conv.get("create_time"))
-                updated=iso(conv.get("update_time"))
-                text=transcript(conv)
-                prio=processing_priority(title,user_text(conv))
-
+                raw=json.dumps(conv,ensure_ascii=False,sort_keys=True,separators=(",",":")); d=conversation_digest(conv)
+                row=c.execute("SELECT raw_json,content_sha256,content_hash_version FROM conversations WHERE conversation_id=?",(cid,)).fetchone()
+                title=conv.get("title") or "Untitled"; created=iso(conv.get("create_time")); updated=iso(conv.get("update_time"))
+                text=transcript(conv); prio=processing_priority(title,user_text(conv))
                 if not row:
-                    c.execute("""INSERT INTO conversations(
-                        conversation_id,title,created_at,updated_at,source_file,source_sha256,
-                        raw_json,transcript,priority,content_sha256,content_hash_version
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-                    (cid,title,created,updated,str(p),fsha,raw,text,prio,d,CONTENT_HASH_VERSION))
-                    m["added"]+=1
-                    continue
-
-                if row["content_hash_version"] == CONTENT_HASH_VERSION and row["content_sha256"]:
-                    old = row["content_sha256"]
+                    c.execute("""INSERT INTO conversations(conversation_id,title,created_at,updated_at,source_file,source_sha256,raw_json,transcript,priority,content_sha256,content_hash_version)
+                                 VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(cid,title,created,updated,str(p),fsha,raw,text,prio,d,CONTENT_HASH_VERSION)); m["added"]+=1; continue
+                if row["content_hash_version"]==CONTENT_HASH_VERSION and row["content_sha256"]: old=row["content_sha256"]
                 else:
-                    try:
-                        old = conversation_digest(json.loads(row["raw_json"]))
-                    except Exception:
-                        old = None
-
+                    try: old=conversation_digest(json.loads(row["raw_json"]))
+                    except Exception: old=None
                 values=(title,created,updated,str(p),fsha,raw,text,prio,d,CONTENT_HASH_VERSION,cid)
-
-                if old == d:
-                    c.execute("""UPDATE conversations SET
-                        title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,
-                        raw_json=?,transcript=?,priority=?,content_sha256=?,content_hash_version=?
-                        WHERE conversation_id=?""", values)
-                    m["unchanged"]+=1
+                if old==d:
+                    c.execute("""UPDATE conversations SET title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,raw_json=?,transcript=?,priority=?,content_sha256=?,content_hash_version=?
+                                 WHERE conversation_id=?""",values); m["unchanged"]+=1
                 else:
                     invalidate(c,cid)
-                    c.execute("""UPDATE conversations SET
-                        title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,
-                        raw_json=?,transcript=?,priority=?,content_sha256=?,content_hash_version=?,
-                        state='pending',attempts=0,last_error=NULL,claimed_at=NULL,processed_at=NULL
-                        WHERE conversation_id=?""", values)
-                    m["updated"]+=1
+                    c.execute("""UPDATE conversations SET title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,raw_json=?,transcript=?,priority=?,content_sha256=?,content_hash_version=?,
+                               state='pending',attempts=0,last_error=NULL,claimed_at=NULL,processed_at=NULL WHERE conversation_id=?""",values); m["updated"]+=1
             c.commit()
         c.execute("INSERT INTO events(at,kind,detail) VALUES(?,?,?)",(now(),"archive-import",json.dumps(m,sort_keys=True)))
     return m
@@ -259,13 +232,17 @@ def index_chats(db,model=EMBED_MODEL,host=OLLAMA_HOST,do_embed=True):
             m["conversations"]+=1
             for idx,start,end,text in parts:
                 h=hashlib.sha256(f"{row['conversation_id']}\0{start}\0{end}\0{text}".encode()).hexdigest()
-                old=c.execute("SELECT chunk_hash,embedding_json,embedding_model FROM chat_chunks WHERE conversation_id=? AND chunk_index=?",(row["conversation_id"],idx)).fetchone(); emb=None
-                if old and old["chunk_hash"]==h and old["embedding_json"] and old["embedding_model"]==model: emb=old["embedding_json"]; m["reused"]+=1
-                elif do_embed: emb=json.dumps(embed(text,model,host)); m["embedded"]+=1
+                old=c.execute("SELECT chunk_hash,embedding_json,embedding_model FROM chat_chunks WHERE conversation_id=? AND chunk_index=?",(row["conversation_id"],idx)).fetchone()
+                emb=None; stored_model=None
+                if old and old["chunk_hash"]==h and old["embedding_json"]:
+                    if old["embedding_model"]==model or not do_embed:
+                        emb=old["embedding_json"]; stored_model=old["embedding_model"]; m["reused"]+=1
+                if emb is None and do_embed:
+                    emb=json.dumps(embed(text,model,host)); stored_model=model; m["embedded"]+=1
                 c.execute("""INSERT INTO chat_chunks(conversation_id,chunk_index,start_message,end_message,chunk_text,embedding_json,embedding_model,chunk_hash,updated_at)
                              VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(conversation_id,chunk_index) DO UPDATE SET start_message=excluded.start_message,end_message=excluded.end_message,
                              chunk_text=excluded.chunk_text,embedding_json=excluded.embedding_json,embedding_model=excluded.embedding_model,chunk_hash=excluded.chunk_hash,updated_at=excluded.updated_at""",
-                          (row["conversation_id"],idx,start,end,text,emb,model if emb else None,h,now())); m["chunks"]+=1
+                          (row["conversation_id"],idx,start,end,text,emb,stored_model,h,now())); m["chunks"]+=1
             c.execute("DELETE FROM chat_chunks WHERE conversation_id=? AND chunk_index>=?",(row["conversation_id"],len(parts))); c.commit()
     return m
 
@@ -325,25 +302,47 @@ def extract(path,m):
 
 
 def discover_assets(source):
-    return sorted(p for p in source.rglob("*") if p.is_file() and (p.suffix.lower()==".dat" or p.name.lower().startswith(("file_","file-"))))
+    out=[]
+    for p in source.rglob("*"):
+        if not p.is_file(): continue
+        name=p.name.lower(); suffix=p.suffix.lower()
+        if name==".agenticos-import-complete" or name in CONTROL_EXPORT_FILES or re.fullmatch(r"conversations(?:-\d+)?\.json",name): continue
+        if suffix==".dat" or name.startswith(("file_","file-")) or suffix in ATTACHMENT_SUFFIXES: out.append(p)
+    return sorted(out)
+
+
+def _canonical_asset_id(c,alias,h):
+    row=c.execute("SELECT asset_id FROM assets WHERE source_sha256=? ORDER BY asset_id LIMIT 1",(h,)).fetchone()
+    if row: return row[0],True
+    candidate=alias
+    collision=c.execute("SELECT source_sha256 FROM assets WHERE asset_id=?",(candidate,)).fetchone()
+    if collision and collision[0]!=h:
+        candidate=h[:32]
+        collision=c.execute("SELECT source_sha256 FROM assets WHERE asset_id=?",(candidate,)).fetchone()
+        if collision and collision[0]!=h: candidate=h
+    return candidate,False
 
 
 def index_assets(db,source):
-    ensure_schema(db); m={"assets":0,"new_or_changed":0,"unchanged":0}
+    ensure_schema(db); m={"files":0,"assets":0,"new_or_changed":0,"unchanged":0,"deduplicated":0}; canonical=set()
     with connect(db) as c:
         for p in discover_assets(source):
-            aid=asset_id(p); h=sha(p); mt=mime(p); ext=EXT.get(mt) or mimetypes.guess_extension(mt) or (p.suffix if p.suffix.lower()!=".dat" else ".bin")
-            old=c.execute("SELECT source_sha256 FROM assets WHERE asset_id=?",(aid,)).fetchone()
-            if old and old[0]==h:
-                c.execute("UPDATE assets SET source_path=?,detected_mime=?,recovered_ext=?,size_bytes=?,updated_at=? WHERE asset_id=?",(str(p),mt,ext,p.stat().st_size,now(),aid)); m["unchanged"]+=1
+            alias=asset_id(p); h=sha(p); mt=mime(p); ext=EXT.get(mt) or mimetypes.guess_extension(mt) or (p.suffix if p.suffix.lower()!=".dat" else ".bin")
+            aid,exists=_canonical_asset_id(c,alias,h)
+            if exists:
+                c.execute("UPDATE assets SET detected_mime=?,recovered_ext=?,size_bytes=?,updated_at=? WHERE asset_id=?",(mt,ext,p.stat().st_size,now(),aid))
+                m["unchanged"]+=1
+                if alias!=aid: m["deduplicated"]+=1
             else:
                 text,status=extract(p,mt)
                 c.execute("""INSERT INTO assets(asset_id,source_path,source_sha256,recovered_path,detected_mime,recovered_ext,size_bytes,extracted_text,extraction_status,updated_at)
-                             VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id) DO UPDATE SET source_path=excluded.source_path,source_sha256=excluded.source_sha256,
-                             detected_mime=excluded.detected_mime,recovered_ext=excluded.recovered_ext,size_bytes=excluded.size_bytes,extracted_text=excluded.extracted_text,
-                             extraction_status=excluded.extraction_status,updated_at=excluded.updated_at""",(aid,str(p),h,None,mt,ext,p.stat().st_size,text,status,now()))
-                c.execute("DELETE FROM asset_chunks WHERE asset_id=?",(aid,)); m["new_or_changed"]+=1
-            m["assets"]+=1
+                             VALUES(?,?,?,?,?,?,?,?,?,?)""",(aid,str(p),h,None,mt,ext,p.stat().st_size,text,status,now()))
+                m["new_or_changed"]+=1
+            c.execute("""INSERT INTO asset_aliases(alias_id,asset_id,source_path,source_sha256,updated_at) VALUES(?,?,?,?,?)
+                         ON CONFLICT(alias_id) DO UPDATE SET asset_id=excluded.asset_id,source_path=excluded.source_path,source_sha256=excluded.source_sha256,updated_at=excluded.updated_at""",
+                      (alias,aid,str(p),h,now()))
+            canonical.add(aid); m["files"]+=1
+        m["assets"]=len(canonical)
     return m
 
 
@@ -351,35 +350,48 @@ def message_text(msg):
     parts=(msg.get("content") or {}).get("parts") or []; return "\n".join(filter(None,(text_part(x) for x in parts))).strip()[:4000]
 
 
-def walk(v,parent=None):
-    if isinstance(v,str): yield v,parent
+def walk(v,parent=None,key=None):
+    if isinstance(v,str): yield v,parent,key
     elif isinstance(v,dict):
-        for x in v.values(): yield from walk(x,v)
+        for k,x in v.items(): yield from walk(x,v,k)
     elif isinstance(v,list):
-        for x in v: yield from walk(x,parent)
+        for x in v: yield from walk(x,parent,key)
+
+
+def _asset_reference_string(s,parent,key):
+    if "file-service://" in s.lower(): return True
+    if not isinstance(parent,dict): return False
+    hints={"asset_pointer","file_id","name","filename","file_name","mime_type","size"}
+    return key in {"asset_pointer","file_id","id"} and bool(hints.intersection(parent))
 
 
 def link_assets(db):
     ensure_schema(db); m={"references":0,"linked_assets":0}; linked=set()
     with connect(db) as c:
-        known={r[0] for r in c.execute("SELECT asset_id FROM assets")}; c.execute("DELETE FROM asset_references")
+        known={r[0]:r[0] for r in c.execute("SELECT asset_id FROM assets")}
+        known.update({r[0]:r[1] for r in c.execute("SELECT alias_id,asset_id FROM asset_aliases")})
+        c.execute("DELETE FROM asset_references")
         for row in c.execute("SELECT conversation_id,raw_json FROM conversations").fetchall():
             try: conv=json.loads(row["raw_json"])
             except json.JSONDecodeError: continue
             for node_id,node in (conv.get("mapping") or {}).items():
                 msg=node.get("message") if isinstance(node,dict) else None
                 if not isinstance(msg,dict): continue
-                ctx=message_text(msg); msgid=str(msg.get("id") or node_id); seen=set()
-                for s,parent in walk(msg):
+                ctx=message_text(msg); msgid=str(msg.get("id") or node_id); found={}
+                for s,parent,key in walk(msg):
+                    if not _asset_reference_string(s,parent,key): continue
                     for match in FILE_ID.finditer(s):
-                        aid=match.group(1).lower()
-                        if aid not in known: continue
+                        alias=match.group(1).lower(); aid=known.get(alias)
+                        if not aid: continue
                         meta={k:parent.get(k) for k in ("id","file_id","asset_pointer","name","filename","file_name","mime_type","size") if isinstance(parent,dict) and k in parent}
-                        rawmeta=json.dumps(meta,ensure_ascii=False,sort_keys=True,default=str); key=(aid,rawmeta)
-                        if key in seen: continue
-                        seen.add(key); name=next((meta.get(k) for k in ("name","filename","file_name") if isinstance(meta.get(k),str)),None)
-                        rh=hashlib.sha256(f"{aid}\0{row['conversation_id']}\0{node_id}\0{msgid}\0{name or ''}\0{rawmeta}".encode()).hexdigest()
-                        c.execute("INSERT OR IGNORE INTO asset_references VALUES(?,?,?,?,?,?,?,?)",(rh,aid,row["conversation_id"],str(node_id),msgid,name,ctx,rawmeta)); m["references"]+=1; linked.add(aid)
+                        bucket=found.setdefault(aid,{})
+                        for k,v in meta.items():
+                            if v not in (None,"") and k not in bucket: bucket[k]=v
+                for aid,meta in found.items():
+                    rawmeta=json.dumps(meta,ensure_ascii=False,sort_keys=True,default=str)
+                    name=next((meta.get(k) for k in ("name","filename","file_name") if isinstance(meta.get(k),str)),None)
+                    rh=hashlib.sha256(f"{aid}\0{row['conversation_id']}\0{node_id}\0{msgid}".encode()).hexdigest()
+                    c.execute("INSERT OR REPLACE INTO asset_references VALUES(?,?,?,?,?,?,?,?)",(rh,aid,row["conversation_id"],str(node_id),msgid,name,ctx,rawmeta)); m["references"]+=1; linked.add(aid)
         m["linked_assets"]=len(linked)
     return m
 
@@ -426,12 +438,17 @@ def index_asset_chunks(db,model=EMBED_MODEL,host=OLLAMA_HOST,do_embed=True):
         for a in c.execute("SELECT * FROM assets ORDER BY asset_id").fetchall():
             text,kind=asset_text(c,a); parts=chunks(text)
             for idx,part in enumerate(parts):
-                h=hashlib.sha256(f"{a['asset_id']}\0{part}".encode()).hexdigest(); old=c.execute("SELECT chunk_hash,embedding_json,embedding_model FROM asset_chunks WHERE asset_id=? AND chunk_index=?",(a["asset_id"],idx)).fetchone(); emb=None
-                if old and old["chunk_hash"]==h and old["embedding_json"] and old["embedding_model"]==model: emb=old["embedding_json"]; m["reused"]+=1
-                elif do_embed and kind!="metadata": emb=json.dumps(embed(part,model,host)); m["embedded"]+=1
+                h=hashlib.sha256(f"{a['asset_id']}\0{part}".encode()).hexdigest()
+                old=c.execute("SELECT chunk_hash,embedding_json,embedding_model FROM asset_chunks WHERE asset_id=? AND chunk_index=?",(a["asset_id"],idx)).fetchone()
+                emb=None; stored_model=None
+                if old and old["chunk_hash"]==h and old["embedding_json"]:
+                    if old["embedding_model"]==model or not do_embed:
+                        emb=old["embedding_json"]; stored_model=old["embedding_model"]; m["reused"]+=1
+                if emb is None and do_embed and kind!="metadata":
+                    emb=json.dumps(embed(part,model,host)); stored_model=model; m["embedded"]+=1
                 c.execute("""INSERT INTO asset_chunks(asset_id,chunk_index,chunk_text,content_kind,embedding_json,embedding_model,chunk_hash,updated_at) VALUES(?,?,?,?,?,?,?,?)
                              ON CONFLICT(asset_id,chunk_index) DO UPDATE SET chunk_text=excluded.chunk_text,content_kind=excluded.content_kind,embedding_json=excluded.embedding_json,
-                             embedding_model=excluded.embedding_model,chunk_hash=excluded.chunk_hash,updated_at=excluded.updated_at""",(a["asset_id"],idx,part,kind,emb,model if emb else None,h,now())); m["chunks"]+=1
+                             embedding_model=excluded.embedding_model,chunk_hash=excluded.chunk_hash,updated_at=excluded.updated_at""",(a["asset_id"],idx,part,kind,emb,stored_model,h,now())); m["chunks"]+=1
             c.execute("DELETE FROM asset_chunks WHERE asset_id=? AND chunk_index>=?",(a["asset_id"],len(parts))); c.commit(); m["assets"]+=1
     return m
 
