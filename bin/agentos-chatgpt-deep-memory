@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${AGENTOS_ROOT:-$HOME/AgenticOS}"
+cd "$ROOT/chatgpt-memory"
+exec python3 src/deep_memory.py "$@"
