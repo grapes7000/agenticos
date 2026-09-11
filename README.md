@@ -61,8 +61,7 @@ See:
 - `chatgpt-memory/` contains the private, local ChatGPT archive pipeline. Raw
   exports, generated views, and databases are ignored by Git.
 - Runtime data defaults to `${XDG_DATA_HOME:-~/.local/share}/agenticos`.
-- Configuration defaults to
-  `${XDG_CONFIG_HOME:-~/.config/agenticos/config.toml`.
+- Configuration defaults to `${XDG_CONFIG_HOME:-~/.config}/agenticos/config.toml`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries.
 
