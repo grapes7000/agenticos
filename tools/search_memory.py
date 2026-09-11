@@ -41,15 +41,15 @@ def _post_json(url: str, payload: dict[str, Any]):
 def embed(text: str):
     base = ollama_base(OLLAMA_HOST)
     try:
-        data = _post_json(f'{base}/api/embeddings', {'model': EMBED_MODEL, 'prompt': text[:8000]})
-        if data.get('embedding'):
-            return data['embedding']
+        data = _post_json(f'{base}/api/embed', {'model': EMBED_MODEL, 'input': text[:8000], 'truncate': True})
+        embeddings = data.get('embeddings') or []
+        if embeddings and isinstance(embeddings[0], list):
+            return embeddings[0]
     except urllib.error.HTTPError as exc:
         if exc.code not in {404, 405}:
             raise
-    data = _post_json(f'{base}/api/embed', {'model': EMBED_MODEL, 'input': text[:8000]})
-    embeddings = data.get('embeddings') or []
-    return embeddings[0] if embeddings and isinstance(embeddings[0], list) else None
+    data = _post_json(f'{base}/api/embeddings', {'model': EMBED_MODEL, 'prompt': text[:8000]})
+    return data.get('embedding')
 
 
 def cosine(a, b):
@@ -75,6 +75,61 @@ def _safe_json_embedding(value: str | None):
     except (TypeError, json.JSONDecodeError):
         return None
     return parsed if isinstance(parsed, list) else None
+
+
+def _table_exists(con: sqlite3.Connection, name: str) -> bool:
+    return con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def load_durable():
+    """Load consolidated Stage-3 canonical knowledge before raw archive recall."""
+    if not CHAT_DB.exists():
+        return []
+    try:
+        with sqlite3.connect(CHAT_DB) as con:
+            con.row_factory = sqlite3.Row
+            if not (_table_exists(con, 'knowledge_items') and _table_exists(con, 'knowledge_groups')):
+                return []
+            rows = con.execute(
+                '''
+                SELECT kg.group_id,kg.namespace,kg.project_slug,kg.category,kg.member_count,
+                       ki.id AS item_id,ki.statement,ki.evidence,ki.status,ki.confidence,
+                       ki.source_conversation_id,ki.source_date,
+                       COALESCE(p.name,kg.project_slug) AS project_name
+                FROM knowledge_groups kg
+                JOIN knowledge_items ki ON ki.id=kg.canonical_item_id
+                LEFT JOIN projects p ON p.slug=kg.project_slug
+                ORDER BY kg.namespace,kg.project_slug,kg.category,ki.id
+                '''
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    results = []
+    for row in rows:
+        text = f"{row['statement']}\n{row['evidence'] or ''}".strip()
+        results.append(
+            {
+                'source_type': 'durable',
+                'source': f'memory://{row["namespace"]}/{row["project_slug"]}/{row["group_id"]}',
+                'title': f'{row["project_name"]} — {row["category"]}',
+                'text': text,
+                'embedding': None,
+                'metadata': {
+                    'namespace': row['namespace'],
+                    'project': row['project_name'],
+                    'category': row['category'],
+                    'status': row['status'],
+                    'confidence': row['confidence'],
+                    'member_count': row['member_count'],
+                    'canonical_item_id': row['item_id'],
+                    'conversation_id': row['source_conversation_id'],
+                    'date': row['source_date'],
+                },
+            }
+        )
+    return results
 
 
 def load_obsidian():
@@ -177,8 +232,10 @@ def load_assets():
 
 
 def search(query: str, limit: int = 8, include: set[str] | None = None):
-    include = include or {'obsidian', 'chatgpt', 'asset'}
+    include = include or {'durable', 'obsidian', 'chatgpt', 'asset'}
     rows = []
+    if 'durable' in include:
+        rows.extend(load_durable())
     if 'obsidian' in include:
         rows.extend(load_obsidian())
     if 'chatgpt' in include:
@@ -194,7 +251,14 @@ def search(query: str, limit: int = 8, include: set[str] | None = None):
 
     scored = []
     for row in rows:
-        score = float(keyword_score(query, row['text']))
+        keywords = float(keyword_score(query, row['text']))
+        if row['source_type'] == 'durable':
+            # Durable canonical knowledge is the preferred retrieval layer when
+            # it actually matches the query. Raw chunks remain available for
+            # semantic recall and source inspection.
+            score = keywords * 7.0 + (12.0 if keywords > 0 else 0.0)
+        else:
+            score = keywords
         if qemb and row['embedding']:
             similarity = cosine(qemb, row['embedding'])
             if similarity >= 0:
@@ -234,6 +298,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Hybrid semantic search across AgenticOS memory.')
     parser.add_argument('query', nargs='+')
     parser.add_argument('--limit', type=int, default=8)
+    parser.add_argument('--durable', action='store_true', help='Search only/select consolidated durable knowledge')
     parser.add_argument('--obsidian', action='store_true', help='Search only/select Obsidian memory')
     parser.add_argument('--chatgpt', action='store_true', help='Search only/select ChatGPT conversation chunks')
     parser.add_argument('--assets', action='store_true', help='Search only/select recovered ChatGPT assets')
@@ -245,6 +310,8 @@ def main():
     args = parse_args()
     query = ' '.join(args.query)
     selected = set()
+    if args.durable:
+        selected.add('durable')
     if args.obsidian:
         selected.add('obsidian')
     if args.chatgpt:
