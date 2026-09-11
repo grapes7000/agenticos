@@ -23,10 +23,10 @@ from chatgpt_memory import (
     PROJECT_PATTERNS,
     connect,
     flatten_conversation,
-    init_database,
     now,
     user_text,
 )
+from identify_fast import ensure_identity_schema
 
 DB_DEFAULT = APP_ROOT / "data" / "memory.sqlite3"
 CONVERSATION_TYPES = {
@@ -43,7 +43,7 @@ CONVERSATION_TYPES = {
 
 
 def ensure_schema(db: Path) -> None:
-    init_database(db)
+    ensure_identity_schema(db)
     with connect(db) as con:
         con.execute(
             """
