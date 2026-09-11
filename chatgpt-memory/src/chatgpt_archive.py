@@ -18,6 +18,8 @@ CACHE = XDG / "chatgpt-imports"
 ASSET_VIEW = XDG / "chatgpt-assets"
 FILE_ID = re.compile(r"\bfile[-_]([A-Za-z0-9]{8,})\b", re.I)
 MAX_TEXT = 2_000_000
+CONTENT_HASH_VERSION = "analysis-v1"
+CONTENT_HASH_VERSION = "analysis-v1"
 EXT = {
     "image/jpeg":".jpg","image/png":".png","image/gif":".gif","image/webp":".webp","image/heif":".heif",
     "application/pdf":".pdf","application/json":".json","application/zip":".zip",
@@ -42,6 +44,7 @@ def ensure_schema(db: Path):
     with connect(db) as c:
         cols={r[1] for r in c.execute("PRAGMA table_info(conversations)")}
         if "content_sha256" not in cols: c.execute("ALTER TABLE conversations ADD COLUMN content_sha256 TEXT")
+        if "content_hash_version" not in cols: c.execute("ALTER TABLE conversations ADD COLUMN content_hash_version TEXT")
         c.executescript("""
         CREATE TABLE IF NOT EXISTS chat_chunks(
           id INTEGER PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(conversation_id), chunk_index INTEGER NOT NULL,
@@ -74,6 +77,24 @@ def sha(path: Path):
 
 def digest_json(v: Any):
     raw=json.dumps(v,ensure_ascii=False,sort_keys=True,separators=(",",":")); return hashlib.sha256(raw.encode()).hexdigest(),raw
+
+
+def conversation_digest(conv: dict[str, Any]) -> str:
+    """Hash only analysis-relevant conversation content, not volatile export metadata."""
+    material = {
+        "title": conv.get("title") or "Untitled",
+        "messages": flatten_conversation(conv),
+    }
+    return digest_json(material)[0]
+
+
+def conversation_digest(conv: dict[str, Any]) -> str:
+    """Hash only analysis-relevant conversation content, not volatile export metadata."""
+    material = {
+        "title": conv.get("title") or "Untitled",
+        "messages": flatten_conversation(conv),
+    }
+    return digest_json(material)[0]
 
 
 def base_url(host: str):
@@ -129,7 +150,7 @@ def conversation_files(source):
 def invalidate(c,cid):
     for table,col in (("candidate_memories","conversation_id"),("deep_facts","source_conversation_id"),("deep_extractions","conversation_id"),
                       ("project_facts","source_conversation_id"),("project_extraction_chunks","source_conversation_id"),("analyses","conversation_id"),
-                      ("chat_chunks","conversation_id"),("asset_references","conversation_id")):
+                      ("asset_references","conversation_id")):
         c.execute(f"DELETE FROM {table} WHERE {col}=?",(cid,))
 
 
@@ -143,22 +164,53 @@ def ingest(db: Path,source: Path):
                 if not isinstance(conv,dict): continue
                 cid=conv.get("id") or conv.get("conversation_id")
                 if not cid: continue
-                d,raw=digest_json(conv); row=c.execute("SELECT raw_json,content_sha256 FROM conversations WHERE conversation_id=?",(cid,)).fetchone()
-                title=conv.get("title") or "Untitled"; prio=processing_priority(title,user_text(conv))
-                data=(title,iso(conv.get("create_time")),iso(conv.get("update_time")),str(p),fsha,raw,transcript(conv),prio,d,cid)
+
+                raw=json.dumps(conv,ensure_ascii=False,sort_keys=True,separators=(",",":"))
+                d=conversation_digest(conv)
+                row=c.execute(
+                    "SELECT raw_json,content_sha256,content_hash_version FROM conversations WHERE conversation_id=?",
+                    (cid,)
+                ).fetchone()
+
+                title=conv.get("title") or "Untitled"
+                created=iso(conv.get("create_time"))
+                updated=iso(conv.get("update_time"))
+                text=transcript(conv)
+                prio=processing_priority(title,user_text(conv))
+
                 if not row:
-                    c.execute("""INSERT INTO conversations(conversation_id,title,created_at,updated_at,source_file,source_sha256,raw_json,transcript,priority,content_sha256)
-                                 VALUES(?,?,?,?,?,?,?,?,?,?)""",(cid,*data[:-1])); m["added"]+=1; continue
-                old=row["content_sha256"]
-                if not old:
-                    try: old=digest_json(json.loads(row["raw_json"]))[0]
-                    except Exception: old=hashlib.sha256(row["raw_json"].encode()).hexdigest()
-                if old==d:
-                    c.execute("UPDATE conversations SET source_file=?,source_sha256=?,content_sha256=?,priority=? WHERE conversation_id=?",(str(p),fsha,d,prio,cid)); m["unchanged"]+=1
+                    c.execute("""INSERT INTO conversations(
+                        conversation_id,title,created_at,updated_at,source_file,source_sha256,
+                        raw_json,transcript,priority,content_sha256,content_hash_version
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                    (cid,title,created,updated,str(p),fsha,raw,text,prio,d,CONTENT_HASH_VERSION))
+                    m["added"]+=1
+                    continue
+
+                if row["content_hash_version"] == CONTENT_HASH_VERSION and row["content_sha256"]:
+                    old = row["content_sha256"]
+                else:
+                    try:
+                        old = conversation_digest(json.loads(row["raw_json"]))
+                    except Exception:
+                        old = None
+
+                values=(title,created,updated,str(p),fsha,raw,text,prio,d,CONTENT_HASH_VERSION,cid)
+
+                if old == d:
+                    c.execute("""UPDATE conversations SET
+                        title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,
+                        raw_json=?,transcript=?,priority=?,content_sha256=?,content_hash_version=?
+                        WHERE conversation_id=?""", values)
+                    m["unchanged"]+=1
                 else:
                     invalidate(c,cid)
-                    c.execute("""UPDATE conversations SET title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,raw_json=?,transcript=?,priority=?,content_sha256=?,
-                               state='pending',attempts=0,last_error=NULL,claimed_at=NULL,processed_at=NULL WHERE conversation_id=?""",data); m["updated"]+=1
+                    c.execute("""UPDATE conversations SET
+                        title=?,created_at=?,updated_at=?,source_file=?,source_sha256=?,
+                        raw_json=?,transcript=?,priority=?,content_sha256=?,content_hash_version=?,
+                        state='pending',attempts=0,last_error=NULL,claimed_at=NULL,processed_at=NULL
+                        WHERE conversation_id=?""", values)
+                    m["updated"]+=1
             c.commit()
         c.execute("INSERT INTO events(at,kind,detail) VALUES(?,?,?)",(now(),"archive-import",json.dumps(m,sort_keys=True)))
     return m
