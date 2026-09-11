@@ -10,6 +10,7 @@ MODEL="${CHATGPT_MEMORY_MODEL:-qwen2.5:7b-instruct}"
 HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
 LARGE_MIN="${AGENTOS_LARGE_CATEGORY_MIN:-100}"
 EXPORT_DIR="${AGENTOS_SEMANTIC_EXPORT_DIR:-$MEMORY_DIR/data/semantic-exports}"
+DEEP_OUTPUT_DIR="${AGENTOS_DEEP_MEMORY_OUTPUT_DIR:-$MEMORY_DIR/memory}"
 
 PY="$VENV/bin/python"
 PIP="$VENV/bin/pip"
@@ -30,15 +31,16 @@ setup_env() {
   need python3
   need sqlite3
   need tmux
-  mkdir -p "$HOME/.local/bin" "$EXPORT_DIR"
+  mkdir -p "$HOME/.local/bin" "$EXPORT_DIR" "$DEEP_OUTPUT_DIR"
   if [[ ! -x "$PY" ]]; then
     say "Creating clustering environment at $VENV"
     python3 -m venv "$VENV"
   fi
   say "Installing/updating clustering dependencies"
   "$PIP" install -q --disable-pip-version-check numpy scikit-learn umap-learn
-  chmod +x "$ROOT/bin/agentos-chatgpt-pipeline" 2>/dev/null || true
+  chmod +x "$ROOT/bin/agentos-chatgpt-pipeline" "$ROOT/bin/agentos-chatgpt-deep-memory" 2>/dev/null || true
   ln -sfn "$ROOT/bin/agentos-chatgpt-pipeline" "$HOME/.local/bin/agentos-chatgpt-pipeline"
+  ln -sfn "$ROOT/bin/agentos-chatgpt-deep-memory" "$HOME/.local/bin/agentos-chatgpt-deep-memory"
   say "Installed CLI: $HOME/.local/bin/agentos-chatgpt-pipeline"
   if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
     printf 'NOTE: ~/.local/bin is not currently in PATH. You can still use:\n  %s/bin/agentos-chatgpt-pipeline\n' "$ROOT"
@@ -50,10 +52,11 @@ ensure_runtime() {
   need python3
   [[ -d "$ROOT" ]] || die "AgenticOS repo not found at $ROOT"
   [[ -f "$MEMORY_DIR/src/chatgpt_memory.py" ]] || die "chatgpt-memory sources not found under $MEMORY_DIR/src"
+  [[ -f "$MEMORY_DIR/src/run_stage3.py" ]] || die "Stage-3 runner not found under $MEMORY_DIR/src"
   if [[ ! -x "$PY" ]]; then
     setup_env
   fi
-  mkdir -p "$EXPORT_DIR"
+  mkdir -p "$EXPORT_DIR" "$DEEP_OUTPUT_DIR"
 }
 
 latest_global_run() {
@@ -113,6 +116,12 @@ show_status() {
     sqlite3 "$DB" "SELECT 'cluster_run' || char(9) || run_id || char(9) || sample_count || char(9) || cluster_count || char(9) || noise_count FROM semantic_cluster_runs ORDER BY created_at DESC LIMIT 10;"
   else
     printf 'semantic_runs\t0\n'
+  fi
+  if table_exists deep_memory_extractions; then
+    sqlite3 "$DB" "SELECT 'deep_queue' || char(9) || state || char(9) || count(*) FROM deep_memory_extractions GROUP BY state ORDER BY state;"
+  fi
+  if table_exists project_memory_snapshots; then
+    printf 'deep_snapshots\t%s\n' "$(sql_scalar 'SELECT count(*) FROM project_memory_snapshots;' || echo 0)"
   fi
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     printf 'tmux\trunning\t%s\n' "$SESSION"
@@ -183,14 +192,14 @@ run_pipeline() {
   local global_run
   global_run="$(latest_global_run)"
   if [[ "$force_clusters" -eq 1 || -z "$global_run" ]]; then
-    say "Stage 3A: global PCA -> UMAP -> DBSCAN"
+    say "Stage 2B: global PCA -> UMAP -> DBSCAN"
     run_cluster "global" --pca-dims 50 --umap-dims 10 --eps 0.8 --min-samples 5
   else
-    say "Stage 3A: existing global semantic run found: $global_run"
+    say "Stage 2B: existing global semantic run found: $global_run"
     label_and_export "$global_run" "global"
   fi
 
-  say "Stage 3B: refine oversized Stage-2 categories (minimum $large_min conversations)"
+  say "Stage 2B: refine oversized Stage-2 categories (minimum $large_min conversations)"
   local category count type_run safe_scope
   while IFS='|' read -r category count; do
     [[ -n "$category" ]] || continue
@@ -205,9 +214,14 @@ run_pipeline() {
     fi
   done < <(sqlite3 "$DB" "SELECT conversation_type,count(*) FROM conversation_organizations GROUP BY conversation_type HAVING count(*) >= $large_min ORDER BY count(*) DESC;")
 
+  say "Stage 3: durable deep memory"
+  OLLAMA_HOST="$HOST" "$PY" "$MEMORY_DIR/src/run_stage3.py" \
+    --model "$MODEL" --host "$HOST" --output "$DEEP_OUTPUT_DIR"
+
   say "Pipeline complete"
   show_status
   printf '\nCSV semantic maps: %s\n' "$EXPORT_DIR"
+  printf 'Durable memory views: %s\n' "$DEEP_OUTPUT_DIR"
 }
 
 start_tmux() {
@@ -228,9 +242,9 @@ usage() {
 Usage: agentos-chatgpt-pipeline <command> [options]
 
 Commands:
-  setup                       Create venv, install clustering deps, install CLI symlink
-  run [options]               Run/resume pipeline in the foreground
-  start [options]             Run/resume pipeline in detached tmux (recommended)
+  setup                       Create venv, install clustering deps, install CLI symlinks
+  run [options]               Run/resume the full pipeline in the foreground
+  start [options]             Run/resume the full pipeline in detached tmux (recommended)
   resume [options]            Alias for start
   attach                      Attach to the pipeline tmux session
   status                      Show DB/pipeline progress
@@ -240,9 +254,9 @@ Commands:
 Run/start options:
   --source PATH               Import a fresh ChatGPT export before later stages
   --model MODEL               Ollama model (default: $MODEL)
-  --host HOST                 Ollama host (default: $HOST)
-  --large-min N               Refine categories with at least N chats (default: $LARGE_MIN)
-  --force-clusters            Create new semantic runs instead of reusing existing ones
+  --host HOST                 Ollama endpoint
+  --large-min N               Subcluster categories with at least N conversations (default: $LARGE_MIN)
+  --force-clusters            Create new PCA/UMAP/DBSCAN runs instead of reusing existing runs
 
 Examples:
   agentos-chatgpt-pipeline start
