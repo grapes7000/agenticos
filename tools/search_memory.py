@@ -11,11 +11,12 @@ VAULT = Path(os.getenv('OBSIDIAN_VAULT', str(Path.home() / 'vault'))).expanduser
 OUT_DIR = VAULT / 'Agentic OS' / 'Search Results'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 EMBED_MODEL = os.getenv('AGENTOS_EMBED_MODEL', 'nomic-embed-text')
+OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434').rstrip('/')
 
 def embed(text: str):
     payload = {'model': EMBED_MODEL, 'prompt': text[:4000]}
     req = urllib.request.Request(
-        'http://localhost:11434/api/embeddings',
+        f'{OLLAMA_HOST}/api/embeddings',
         data=json.dumps(payload).encode('utf-8'),
         headers={'Content-Type': 'application/json'},
     )

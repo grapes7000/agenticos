@@ -8,6 +8,7 @@ import urllib.request
 DB = Path('data/db/agent_os.sqlite')
 VAULT = Path(os.getenv('OBSIDIAN_VAULT', str(Path.home() / 'vault'))).expanduser()
 EMBED_MODEL = os.getenv('AGENTOS_EMBED_MODEL', 'nomic-embed-text')
+OLLAMA_HOST = os.getenv('OLLAMA_HOST', 'http://localhost:11434').rstrip('/')
 MAX_FILE_CHARS = int(os.getenv('AGENTOS_MAX_FILE_CHARS', '60000'))
 CHUNK_SIZE = int(os.getenv('AGENTOS_CHUNK_SIZE', '2400'))
 CHUNK_OVERLAP = int(os.getenv('AGENTOS_CHUNK_OVERLAP', '300'))
@@ -38,7 +39,7 @@ def embed(text: str):
     # Ollama embeddings endpoint. If unavailable, caller stores None and keyword search still works.
     payload = {'model': EMBED_MODEL, 'prompt': text[:4000]}
     req = urllib.request.Request(
-        'http://localhost:11434/api/embeddings',
+        f'{OLLAMA_HOST}/api/embeddings',
         data=json.dumps(payload).encode('utf-8'),
         headers={'Content-Type': 'application/json'},
     )
