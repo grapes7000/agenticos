@@ -17,20 +17,26 @@ Implemented:
 - conversation change detection and selective invalidation;
 - conversation and attachment semantic embeddings;
 - attachment MIME recovery, SHA deduplication, extraction, and provenance;
-- hybrid semantic search over Obsidian, ChatGPT chunks, and attachments;
+- hybrid semantic search over Obsidian, ChatGPT chunks, attachments, and durable
+  Stage-3 knowledge;
 - separate identity routing (`LAKOTA`, `BROOKE`, `SHARED`, `UNKNOWN`);
 - lightweight conversation organization (summary, tags, projects, type,
   importance);
 - PCA -> UMAP -> DBSCAN semantic discovery directly from SQLite embeddings;
 - 2-D UMAP visualization coordinates;
-- local-model cluster labeling;
-- scoped subclustering for oversized Stage-2 categories;
+- local-model cluster labeling and scoped subclustering;
 - resumable tmux pipeline runner: `bin/agentos-chatgpt-pipeline`;
-- source-backed project/knowledge index foundation in `knowledge_index.py`;
 - Stage 3.1 content-aware deep-memory queue and extraction state;
 - Stage 3.2 turn-aware structured passage extraction;
 - Stage 3.3 many-to-many project routing and source-backed knowledge writing;
-- Stage 3.4 evidence gating and error/attempt/confirmed-fix relations.
+- Stage 3.4 evidence gating and error/attempt/confirmed-fix relations;
+- Stage 3.5 conservative duplicate groups, temporal supersession, conflicts,
+  review queue, and durable overrides;
+- Stage 3.6 project snapshots that use semantic clusters as context without
+  treating cluster membership as factual proof;
+- Stage 3.7 namespace/project Markdown views and durable-first search;
+- Stage 3.8 integration of the complete Stage-3 runner into the main tmux
+  pipeline.
 
 Current pipeline boundary:
 
@@ -43,30 +49,43 @@ Stage 3.1 schema + resumable queue             IMPLEMENTED
 Stage 3.2 structured passage extraction       IMPLEMENTED
 Stage 3.3 project routing + knowledge writer  IMPLEMENTED
 Stage 3.4 relations / confirmed fixes         IMPLEMENTED
-Stage 3.5 dedup / temporal conflicts          NOT STARTED
+Stage 3.5 dedup / temporal conflicts          IMPLEMENTED
+Stage 3.6 project + cluster consolidation     IMPLEMENTED
+Stage 3.7 Markdown + search integration       IMPLEMENTED
+Stage 3.8 main pipeline integration           IMPLEMENTED
 ```
 
-The user's current database may still be processing earlier implemented stages;
-the code paths are resumable and existing completed work is reused.
+The user's current database has a Stage-3 queue of thousands of passages. The
+full run is intentionally resumable and should run through the tmux pipeline,
+not a fragile foreground terminal.
 
 ## Stage 3 implementation
 
-Primary implementation:
+Primary extraction implementation:
 
 ```text
 chatgpt-memory/src/deep_memory.py
 ```
 
-CLI wrapper:
+Consolidation/render implementation:
 
 ```text
-bin/agentos-chatgpt-deep-memory
+chatgpt-memory/src/deep_memory_finalize.py
+```
+
+Full Stage-3 orchestrator:
+
+```text
+chatgpt-memory/src/run_stage3.py
 ```
 
 Focused tests:
 
 ```text
 chatgpt-memory/tests/test_deep_memory_stage3.py
+chatgpt-memory/tests/test_deep_memory_queue.py
+chatgpt-memory/tests/test_deep_memory_finalize.py
+chatgpt-memory/tests/test_durable_search.py
 ```
 
 Design plan:
@@ -75,27 +94,29 @@ Design plan:
 docs/CHATGPT_MEMORY_STAGE3_PLAN.md
 ```
 
-Stage 3 is intentionally not integrated into the main pipeline runner yet;
-that remains Stage 3.8 after the deep-memory stages are stable.
-
 ## Architectural decisions currently in force
 
 - SQLite remains the canonical source of truth.
 - Generated Markdown and CSV files are rebuildable views/exports.
 - Identity is decided upstream and is not reclassified by later stages.
-- Semantic clusters are context for grouping/consolidation, not factual proof.
+- Semantic clusters are grouping/context signals, never factual proof.
+- Atomic source-backed `knowledge_items` are preserved even when consolidation
+  groups, supersedes, suppresses, or disputes them.
 - Deep memory preserves source evidence and temporal history.
 - Assistant-only claims are not promoted as durable facts.
 - Confirmed solutions require explicit user-authored success evidence.
 - Brooke/Lakota/shared namespaces are not silently mixed.
 - One conversation/item may belong to multiple projects.
 - Failed approaches remain separately searchable from confirmed solutions.
+- Conflicting current-state claims are retained in `knowledge_conflicts` and the
+  review queue rather than silently resolved by timestamp.
+- User corrections live in `knowledge_overrides` so rebuilding does not erase
+  them.
 - Legacy `chatgpt_memory.py deepen/expand-projects` logic is retained for
-  migration/reference but is not the preferred architecture for new Stage-3
-  work.
+  migration/reference but is not the preferred architecture.
 
 ## Next review boundary
 
-Stop after Stage 3.4. Run the local Stage-3 tests and review queue invalidation,
-passage provenance, project routing, solution-confirmation rules, and relation
-quality before beginning Stage 3.5.
+Run the complete Stage-3 regression suite locally before beginning the expensive
+LLM extraction over the real 7k+ passage queue. After the tests pass, resume the
+full pipeline in tmux and inspect early batches plus conflict/review quality.
