@@ -35,6 +35,19 @@ from chatgpt_memory import (
 
 DB_DEFAULT = APP_ROOT / "data" / "memory.sqlite3"
 IDENTITIES = {"LAKOTA", "BROOKE", "SHARED", "UNKNOWN"}
+IDENTITY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "identity": {
+            "type": "string",
+            "enum": ["LAKOTA", "BROOKE", "SHARED", "UNKNOWN"],
+        },
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "reason": {"type": "string"},
+    },
+    "required": ["identity", "confidence", "reason"],
+    "additionalProperties": False,
+}
 
 
 def ensure_identity_schema(db: Path) -> None:
@@ -60,7 +73,7 @@ def ensure_identity_schema(db: Path) -> None:
 
 
 def backfill_existing_analyses(db: Path) -> int:
-    """Seed the new identity table from the  existing full-analysis results."""
+    """Seed the new identity table from the existing full-analysis results."""
     saved = 0
     with connect(db) as con:
         for row in con.execute(
@@ -115,9 +128,21 @@ def sampled_user_excerpt(conv: dict[str, Any], max_chars: int = 4500) -> str:
 def normalize_identity(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("identity response is not an object")
-    identity = str(value.get("identity", "UNKNOWN")).upper()
+    identity = str(value.get("identity", "UNKNOWN")).strip().upper()
     if identity not in IDENTITIES:
-        raise ValueError(f"invalid identity: {identity}")
+        # Older/smaller models sometimes copy an enum example literally, e.g.
+        # "LAKOTA|BROOKE|SHARED|UNKNOWN". Treat that as uncertainty rather than
+        # failing the entire conversation and retrying/quarantining it.
+        choices = [part.strip() for part in identity.split("|") if part.strip() in IDENTITIES]
+        if len(set(choices)) > 1:
+            identity = "UNKNOWN"
+            value = dict(value)
+            value["confidence"] = min(float(value.get("confidence", 0.0) or 0.0), 0.25)
+            value["reason"] = "Model returned multiple identity choices; recorded as UNKNOWN"
+        elif len(choices) == 1:
+            identity = choices[0]
+        else:
+            raise ValueError(f"invalid identity: {identity}")
     try:
         confidence = float(value.get("confidence", 0.0))
     except (TypeError, ValueError):
@@ -150,8 +175,11 @@ Account users:
 - SHARED: clear evidence that both people actively participate in the same conversation.
 - UNKNOWN: genuinely insufficient evidence.
 
-Return JSON only, exactly these fields:
-{{"identity":"LAKOTA|BROOKE|SHARED|UNKNOWN","confidence":0.0,"reason":"one short sentence"}}
+Choose exactly ONE identity from: LAKOTA, BROOKE, SHARED, UNKNOWN.
+Do not combine choices and do not use pipe characters in the identity value.
+Return JSON only with exactly these fields.
+Example valid output:
+{{"identity":"LAKOTA","confidence":0.96,"reason":"Linux and SSH troubleshooting is strongly associated with Lakota."}}
 
 Title: {title}
 Sampled user messages:
@@ -162,7 +190,7 @@ Sampled user messages:
         "model": model,
         "prompt": prompt,
         "stream": False,
-        "format": "json",
+        "format": IDENTITY_SCHEMA,
         "options": {"temperature": 0, "num_predict": 80},
     }
     req = urllib.request.Request(
