@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="${AGENTOS_ROOT:-$HOME/AgenticOS}"
+MEMORY_DIR="$ROOT/chatgpt-memory"
+DB="${AGENTOS_CHATGPT_DB:-$MEMORY_DIR/data/memory.sqlite3}"
+VENV="${AGENTOS_CHATGPT_VENV:-$ROOT/.venv-chatgpt-pipeline}"
+SESSION="${AGENTOS_CHATGPT_SESSION:-chatgpt-pipeline}"
+MODEL="${CHATGPT_MEMORY_MODEL:-qwen2.5:7b-instruct}"
+HOST="${OLLAMA_HOST:-http://127.0.0.1:11434}"
+LARGE_MIN="${AGENTOS_LARGE_CATEGORY_MIN:-100}"
+EXPORT_DIR="${AGENTOS_SEMANTIC_EXPORT_DIR:-$MEMORY_DIR/data/semantic-exports}"
+
+PY="$VENV/bin/python"
+PIP="$VENV/bin/pip"
+
+say() { printf '\n==> %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"; }
+
+sql_scalar() {
+  sqlite3 "$DB" "$1" 2>/dev/null | head -n1
+}
+
+table_exists() {
+  [[ "$(sqlite3 "$DB" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='$1';" 2>/dev/null || echo 0)" == "1" ]]
+}
+
+setup_env() {
+  need python3
+  need sqlite3
+  need tmux
+  mkdir -p "$HOME/.local/bin" "$EXPORT_DIR"
+  if [[ ! -x "$PY" ]]; then
+    say "Creating clustering environment at $VENV"
+    python3 -m venv "$VENV"
+  fi
+  say "Installing/updating clustering dependencies"
+  "$PIP" install -q --disable-pip-version-check numpy scikit-learn umap-learn
+  chmod +x "$ROOT/bin/agentos-chatgpt-pipeline" 2>/dev/null || true
+  ln -sfn "$ROOT/bin/agentos-chatgpt-pipeline" "$HOME/.local/bin/agentos-chatgpt-pipeline"
+  say "Installed CLI: $HOME/.local/bin/agentos-chatgpt-pipeline"
+  if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+    printf 'NOTE: ~/.local/bin is not currently in PATH. You can still use:\n  %s/bin/agentos-chatgpt-pipeline\n' "$ROOT"
+  fi
+}
+
+ensure_runtime() {
+  need sqlite3
+  need python3
+  [[ -d "$ROOT" ]] || die "AgenticOS repo not found at $ROOT"
+  [[ -f "$MEMORY_DIR/src/chatgpt_memory.py" ]] || die "chatgpt-memory sources not found under $MEMORY_DIR/src"
+  if [[ ! -x "$PY" ]]; then
+    setup_env
+  fi
+  mkdir -p "$EXPORT_DIR"
+}
+
+latest_global_run() {
+  table_exists semantic_cluster_runs || return 0
+  sqlite3 "$DB" "SELECT run_id FROM semantic_cluster_runs WHERE scope_json LIKE '%\"conversation_type\": null%' AND scope_json LIKE '%\"identity\": null%' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null || true
+}
+
+latest_type_run() {
+  local category="$1"
+  table_exists semantic_cluster_runs || return 0
+  sqlite3 "$DB" "SELECT run_id FROM semantic_cluster_runs WHERE scope_json LIKE '%\"conversation_type\": \"$category\"%' AND scope_json LIKE '%\"identity\": null%' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null || true
+}
+
+label_and_export() {
+  local run_id="$1" scope="$2"
+  [[ -n "$run_id" ]] || return 0
+  say "Labeling semantic clusters for $scope ($run_id)"
+  OLLAMA_HOST="$HOST" "$PY" "$MEMORY_DIR/src/label_semantic_clusters.py" run "$run_id" \
+    --model "$MODEL" --host "$HOST"
+  "$PY" "$MEMORY_DIR/src/semantic_cluster.py" export "$run_id" "$EXPORT_DIR/${run_id}-${scope}.csv"
+}
+
+run_cluster() {
+  local scope="$1"; shift
+  local tmp run_id
+  tmp="$(mktemp)"
+  "$PY" "$MEMORY_DIR/src/semantic_cluster.py" run "$@" | tee "$tmp"
+  run_id="$(sed -n 's/^run \(sem-[0-9a-f]*\):.*/\1/p' "$tmp" | tail -n1)"
+  rm -f "$tmp"
+  [[ -n "$run_id" ]] || die "Could not determine semantic run id for $scope"
+  label_and_export "$run_id" "$scope"
+}
+
+show_status() {
+  [[ -f "$DB" ]] || { printf 'database\tmissing\t%s\n' "$DB"; return 0; }
+  printf 'database\t%s\n' "$DB"
+  printf 'model\t%s\n' "$MODEL"
+  printf 'ollama\t%s\n' "$HOST"
+  printf 'conversations\t%s\n' "$(sql_scalar 'SELECT count(*) FROM conversations;' || echo 0)"
+  if table_exists identity_classifications; then
+    printf 'identified\t%s\n' "$(sql_scalar 'SELECT count(*) FROM identity_classifications;' || echo 0)"
+    sqlite3 "$DB" "SELECT 'identity' || char(9) || identity || char(9) || count(*) FROM identity_classifications GROUP BY identity ORDER BY count(*) DESC;"
+  else
+    printf 'identified\t0\n'
+  fi
+  if table_exists conversation_organizations; then
+    printf 'organized\t%s\n' "$(sql_scalar 'SELECT count(*) FROM conversation_organizations;' || echo 0)"
+    sqlite3 "$DB" "SELECT 'type' || char(9) || conversation_type || char(9) || count(*) FROM conversation_organizations GROUP BY conversation_type ORDER BY count(*) DESC;"
+  else
+    printf 'organized\t0\n'
+  fi
+  if table_exists chat_chunks; then
+    printf 'embedded_conversations\t%s\n' "$(sql_scalar 'SELECT count(DISTINCT conversation_id) FROM chat_chunks WHERE embedding_json IS NOT NULL;' || echo 0)"
+  fi
+  if table_exists semantic_cluster_runs; then
+    printf 'semantic_runs\t%s\n' "$(sql_scalar 'SELECT count(*) FROM semantic_cluster_runs;' || echo 0)"
+    sqlite3 "$DB" "SELECT 'cluster_run' || char(9) || run_id || char(9) || sample_count || char(9) || cluster_count || char(9) || noise_count FROM semantic_cluster_runs ORDER BY created_at DESC LIMIT 10;"
+  else
+    printf 'semantic_runs\t0\n'
+  fi
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    printf 'tmux\trunning\t%s\n' "$SESSION"
+  else
+    printf 'tmux\tstopped\t%s\n' "$SESSION"
+  fi
+}
+
+run_pipeline() {
+  local source="" force_clusters=0 large_min="$LARGE_MIN"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --source) source="${2:-}"; shift 2 ;;
+      --large-min) large_min="${2:-}"; shift 2 ;;
+      --force-clusters) force_clusters=1; shift ;;
+      --model) MODEL="${2:-}"; shift 2 ;;
+      --host) HOST="${2:-}"; shift 2 ;;
+      *) die "Unknown run option: $1" ;;
+    esac
+  done
+
+  ensure_runtime
+  cd "$ROOT"
+
+  if [[ -n "$source" ]]; then
+    say "Stage 0: import + attachment/chat embeddings"
+    OLLAMA_HOST="$HOST" "$ROOT/bin/agentos-chatgpt-import" "$source"
+  elif [[ ! -f "$DB" ]]; then
+    die "No database exists yet. Re-run with --source /path/to/chatgpt-export"
+  else
+    say "Stage 0: existing database detected; import skipped"
+  fi
+
+  local total identified organized unclassified remaining_org
+  total="$(sql_scalar 'SELECT count(*) FROM conversations;')"
+  [[ -n "$total" && "$total" -gt 0 ]] || die "No conversations found in $DB"
+
+  identified=0
+  table_exists identity_classifications && identified="$(sql_scalar 'SELECT count(*) FROM identity_classifications;')"
+  if [[ "$identified" -lt "$total" ]]; then
+    say "Stage 1: identity routing ($identified/$total already classified)"
+    OLLAMA_HOST="$HOST" "$PY" "$MEMORY_DIR/src/identify_fast.py" run \
+      --limit "$((total + 100))" --model "$MODEL" --host "$HOST" --decisive
+  else
+    say "Stage 1: identity routing already complete ($identified/$total)"
+  fi
+
+  unclassified="$(sqlite3 "$DB" "SELECT count(*) FROM conversations c LEFT JOIN identity_classifications i USING(conversation_id) WHERE i.conversation_id IS NULL;")"
+  if [[ "$unclassified" -gt 0 ]]; then
+    say "WARNING: $unclassified conversation(s) still lack an identity; later stages will skip them"
+  fi
+
+  organized=0
+  table_exists conversation_organizations && organized="$(sql_scalar 'SELECT count(*) FROM conversation_organizations;')"
+  remaining_org="$(sqlite3 "$DB" "SELECT count(*) FROM conversations c JOIN identity_classifications i USING(conversation_id) LEFT JOIN conversation_organizations o USING(conversation_id) WHERE o.conversation_id IS NULL;" 2>/dev/null || echo 0)"
+  if [[ "$remaining_org" -gt 0 ]]; then
+    say "Stage 2: summaries, tags, projects, type, importance ($organized already organized)"
+    OLLAMA_HOST="$HOST" "$PY" "$MEMORY_DIR/src/organize_fast.py" run \
+      --limit "$((total + 100))" --model "$MODEL" --host "$HOST"
+  else
+    say "Stage 2: organization already complete for all identified conversations"
+  fi
+
+  if ! table_exists chat_chunks || [[ "$(sql_scalar 'SELECT count(*) FROM chat_chunks WHERE embedding_json IS NOT NULL;' || echo 0)" -eq 0 ]]; then
+    die "No conversation embeddings found. Import with embeddings before semantic clustering."
+  fi
+
+  local global_run
+  global_run="$(latest_global_run)"
+  if [[ "$force_clusters" -eq 1 || -z "$global_run" ]]; then
+    say "Stage 3A: global PCA -> UMAP -> DBSCAN"
+    run_cluster "global" --pca-dims 50 --umap-dims 10 --eps 0.8 --min-samples 5
+  else
+    say "Stage 3A: existing global semantic run found: $global_run"
+    label_and_export "$global_run" "global"
+  fi
+
+  say "Stage 3B: refine oversized Stage-2 categories (minimum $large_min conversations)"
+  local category count type_run safe_scope
+  while IFS='|' read -r category count; do
+    [[ -n "$category" ]] || continue
+    printf 'Large category: %s (%s conversations)\n' "$category" "$count"
+    type_run="$(latest_type_run "$category")"
+    safe_scope="$(printf '%s' "$category" | tr -c 'A-Za-z0-9_-' '_')"
+    if [[ "$force_clusters" -eq 1 || -z "$type_run" ]]; then
+      run_cluster "type-${safe_scope}" --type "$category" --pca-dims 30 --umap-dims 8 --eps 0.8 --min-samples 4
+    else
+      printf 'Using existing scoped run: %s\n' "$type_run"
+      label_and_export "$type_run" "type-${safe_scope}"
+    fi
+  done < <(sqlite3 "$DB" "SELECT conversation_type,count(*) FROM conversation_organizations GROUP BY conversation_type HAVING count(*) >= $large_min ORDER BY count(*) DESC;")
+
+  say "Pipeline complete"
+  show_status
+  printf '\nCSV semantic maps: %s\n' "$EXPORT_DIR"
+}
+
+start_tmux() {
+  need tmux
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    die "tmux session '$SESSION' is already running. Use: agentos-chatgpt-pipeline attach"
+  fi
+  local args=(run "$@") q=""
+  printf -v q '%q ' "$ROOT/bin/agentos-chatgpt-pipeline" "${args[@]}"
+  tmux new-session -d -s "$SESSION" "cd $(printf '%q' "$ROOT") && $q"
+  printf 'Started tmux session: %s\n' "$SESSION"
+  printf 'Attach: agentos-chatgpt-pipeline attach\n'
+  printf 'Status: agentos-chatgpt-pipeline status\n'
+}
+
+usage() {
+  cat <<EOF
+Usage: agentos-chatgpt-pipeline <command> [options]
+
+Commands:
+  setup                       Create venv, install clustering deps, install CLI symlink
+  run [options]               Run/resume pipeline in the foreground
+  start [options]             Run/resume pipeline in detached tmux (recommended)
+  resume [options]            Alias for start
+  attach                      Attach to the pipeline tmux session
+  status                      Show DB/pipeline progress
+  logs                        Show recent tmux output without attaching
+  stop                        Stop the pipeline tmux session
+
+Run/start options:
+  --source PATH               Import a fresh ChatGPT export before later stages
+  --model MODEL               Ollama model (default: $MODEL)
+  --host HOST                 Ollama host (default: $HOST)
+  --large-min N               Refine categories with at least N chats (default: $LARGE_MIN)
+  --force-clusters            Create new semantic runs instead of reusing existing ones
+
+Examples:
+  agentos-chatgpt-pipeline start
+  agentos-chatgpt-pipeline start --source /home/lakota/Documents/09-11-2026-chatgpt
+  agentos-chatgpt-pipeline status
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+case "$cmd" in
+  setup|install) setup_env ;;
+  run) run_pipeline "$@" ;;
+  start|resume) start_tmux "$@" ;;
+  attach) tmux attach -t "$SESSION" ;;
+  status) show_status ;;
+  logs) tmux capture-pane -p -t "$SESSION" -S -120 ;;
+  stop) tmux kill-session -t "$SESSION" 2>/dev/null || true ;;
+  help|-h|--help) usage ;;
+  *) usage; die "Unknown command: $cmd" ;;
+esac
