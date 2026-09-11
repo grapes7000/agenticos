@@ -22,6 +22,35 @@ operating system and it does not make destructive changes automatically.
 `audit` gathers more detailed read-only evidence. `maintain` only suggests
 actions; it does not apply them.
 
+## ChatGPT memory pipeline
+
+The private ChatGPT archive pipeline is staged and resumable:
+
+```text
+archive/attachments/embeddings
+-> identity routing
+-> lightweight organization
+-> PCA/UMAP/DBSCAN semantic discovery
+-> durable deep memory (Stage 3, planned)
+```
+
+For the implemented Stages 0–2B:
+
+```bash
+bash bin/agentos-chatgpt-pipeline setup
+OLLAMA_HOST=100.91.175.25:11434 agentos-chatgpt-pipeline start
+agentos-chatgpt-pipeline status
+```
+
+See:
+
+- [chatgpt-memory/PIPELINE.md](chatgpt-memory/PIPELINE.md) for the runnable
+  pipeline;
+- [docs/CHATGPT_MEMORY_PLAN.md](docs/CHATGPT_MEMORY_PLAN.md) for the overall
+  memory architecture;
+- [docs/CHATGPT_MEMORY_STAGE3_PLAN.md](docs/CHATGPT_MEMORY_STAGE3_PLAN.md) for
+  the deep-memory implementation plan.
+
 ## Design
 
 - `agenticos/` contains the supported CLI, settings, database, workflows, and
@@ -33,11 +62,9 @@ actions; it does not apply them.
   exports, generated views, and databases are ignored by Git.
 - Runtime data defaults to `${XDG_DATA_HOME:-~/.local/share}/agenticos`.
 - Configuration defaults to
-  `${XDG_CONFIG_HOME:-~/.config}/agenticos/config.toml`.
+  `${XDG_CONFIG_HOME:-~/.config/agenticos/config.toml`.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries and
-[docs/CHATGPT_MEMORY_PLAN.md](docs/CHATGPT_MEMORY_PLAN.md) for the project and
-error knowledge model.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component boundaries.
 
 ## Configuration
 
@@ -55,5 +82,8 @@ python3 -m unittest discover -s tests -v
 python3 -m agenticos.cli doctor
 ```
 
-The large historical `.venv` is not required by the new core. Optional legacy
-AI workflows may still need Ollama and their original Python packages.
+The large historical `.venv` is not required by the supported core. The ChatGPT
+semantic clustering pipeline installs its optional NumPy/scikit-learn/UMAP
+dependencies into a dedicated virtual environment via
+`agentos-chatgpt-pipeline setup`. Other legacy AI workflows may still require
+Ollama and their original Python packages.
