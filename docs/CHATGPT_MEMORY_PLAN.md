@@ -1,104 +1,176 @@
-# ChatGPT project and error memory plan
+# ChatGPT Memory Plan
 
 ## Goal
 
-Turn the private ChatGPT export into source-backed project dossiers where:
+Turn private ChatGPT exports into a local, source-backed memory system where:
 
-- one conversation can belong to any number of projects;
-- one passage can produce facts for different projects;
-- errors, failed approaches, fixes, decisions, configuration, and current state
-  are distinct searchable categories;
-- every claim points back to its conversation and date;
-- uncertainty and historical status are preserved;
-- Brooke and shared conversations retain their privacy boundaries.
+- every conversation and attachment remains traceable to its source;
+- Brooke, Lakota, shared, and unknown material remain separated by namespace;
+- conversations can belong to multiple projects and semantic topics;
+- broad categories can be refined by semantic clustering;
+- durable memory distinguishes errors, failed attempts, confirmed fixes,
+  decisions, configuration, state, workflows, and lessons;
+- current and historical facts can coexist without silently overwriting one
+  another;
+- raw exports remain read-only.
 
-## Implemented foundation
+## Current staged architecture
 
-`knowledge_index.py` adds three non-destructive tables to the existing archive:
+### Stage 0 — Archive ingest and semantic indexing — implemented
 
-- `projects`: canonical project names and aliases;
-- `conversation_projects`: a many-to-many routing table with relevance and
-  rationale;
-- `knowledge_items`: normalized source-backed facts grouped into categories
-  such as `error`, `solution`, `decision`, `configuration`, and `status`.
+`chatgpt_archive.py` handles:
 
-An FTS5 index supports combined keyword, project, and category search. Generated
-project folders contain a README, source-conversation list, and one document per
-knowledge category.
+- incremental ZIP or extracted-directory import;
+- conversation content hashing and changed-source invalidation;
+- turn-aware conversation chunking;
+- Ollama embeddings (`nomic-embed-text` by default);
+- attachment discovery, SHA deduplication, MIME recovery, and text extraction;
+- attachment-to-conversation provenance;
+- semantic indexing of conversation and attachment text/context.
 
-## Extraction plan
-
-### Phase 1 — deterministic rebuild
-
-Build the index from existing analysis and extracted facts:
-
-```bash
-agentos memory reindex
-agentos memory projects
-agentos memory errors --project agenticos
-agentos memory search "database path" --project agenticos
-```
-
-This phase is resumable and makes no model calls.
-
-### Phase 2 — reroute all conversations
-
-The earlier import marked 400 of 563 conversations as `UNKNOWN`. That identity
-classification must not prevent project routing. Run a local-model topic pass
-over every conversation, while keeping identity/privacy classification separate.
-
-For each 8–12k-character passage, return:
-
-```json
-{
-  "projects": [
-    {"name": "AgenticOS", "relevance": 0.91, "evidence": "..."},
-    {"name": "Local AI Infrastructure", "relevance": 0.63, "evidence": "..."}
-  ]
-}
-```
-
-Merge aliases conservatively (`Agentic OS` and `AgenticOS`) but never combine
-projects solely because their names are similar.
-
-### Phase 3 — passage-level knowledge extraction
-
-Extract independent items rather than one summary per conversation:
-
-- `error`: symptom, exact message, affected component, environment;
-- `failed_approach`: attempted action and observed failure;
-- `solution`: action that the user confirmed worked;
-- `decision`: choice and reason;
-- `configuration`: paths, services, versions, and settings;
-- `status`: current or historical project state;
-- `lesson`: reusable conclusion.
-
-Each item receives one primary project and optional related projects. Never turn
-an assistant suggestion into a successful solution unless later user text
-confirms the outcome.
-
-### Phase 4 — error linking and deduplication
-
-Normalize error signatures while retaining original text. Link:
+Canonical archive state is:
 
 ```text
-error -> failed approaches -> confirmed solution -> affected projects -> sources
+chatgpt-memory/data/memory.sqlite3
 ```
 
-Deduplicate semantically similar errors only when component, symptom, and cause
-agree. Preserve separate occurrences as evidence links.
+### Stage 1 — Identity routing — implemented
 
-### Phase 5 — review queue
+`identify_fast.py` stores identity separately in `identity_classifications`.
 
-Put low-confidence project assignments, conflicting current-state claims, and
-unconfirmed solutions into a small review queue. Corrections should become
-durable overrides so future rebuilds do not undo them.
+Identity is limited to:
 
-## Quality checks
+```text
+LAKOTA
+BROOKE
+SHARED
+UNKNOWN
+```
 
-- Every generated statement has a source conversation ID.
-- Every solution has explicit success evidence.
-- A conversation can appear in multiple project dossiers.
-- Searches can filter by project, category, status, date, and confidence.
-- Rebuilding is idempotent.
-- Raw conversation content is treated as untrusted input and remains local.
+The pass uses deterministic signals first and a local Ollama model only for
+ambiguous conversations. Identity is independent from later organization and
+deep-memory extraction.
+
+### Stage 2 — Lightweight organization — implemented
+
+`organize_fast.py` consumes the identity table and stores:
+
+- one-sentence summary;
+- tags;
+- project hints;
+- conversation type;
+- importance score.
+
+It does not extract durable facts and does not re-decide identity.
+
+### Stage 2B — Semantic discovery and category refinement — implemented
+
+`semantic_cluster.py` reads existing conversation chunk embeddings directly from
+SQLite and builds one normalized mean-pooled vector per conversation.
+
+The discovery pipeline is:
+
+```text
+conversation chunk embeddings
+-> normalize chunks
+-> mean-pool per conversation
+-> normalize conversation vector
+-> PCA
+-> UMAP in higher-dimensional clustering space
+-> DBSCAN
+```
+
+A separate 2-D UMAP is used only for visualization/export. DBSCAN is not run on
+the 2-D visualization representation.
+
+`label_semantic_clusters.py` assigns human-readable labels to discovered
+clusters using representative Stage-2 summaries. Oversized Stage-2 categories
+can be clustered again within their own scope so broad buckets such as
+`troubleshooting` or `design_creative` can split into useful subtopics.
+
+All clustering runs are retained independently in SQLite and may also be
+exported as CSV.
+
+### Pipeline runner — implemented
+
+`bin/agentos-chatgpt-pipeline` wraps Stages 0–2B into one resumable workflow.
+
+It can:
+
+- start from a new export with `--source`;
+- resume an existing database;
+- skip completed identity and organization work;
+- run in detached tmux;
+- install clustering dependencies into its own virtual environment;
+- reuse existing semantic runs or create fresh runs;
+- automatically refine categories above `--large-min`;
+- label semantic clusters and export CSV maps.
+
+See `chatgpt-memory/PIPELINE.md` for commands.
+
+## Existing knowledge-index foundation
+
+`knowledge_index.py` already provides a non-destructive source-backed project
+index:
+
+- `projects` — canonical project names and aliases;
+- `conversation_projects` — many-to-many conversation/project routing;
+- `knowledge_items` — atomic source-backed knowledge grouped by category;
+- FTS5 search over project knowledge;
+- generated project dossiers.
+
+Legacy `deep_facts` and `project_facts` can be imported into that foundation,
+but the older all-in-one `chatgpt_memory.py process/deepen/expand-projects`
+workflow is no longer the preferred architecture for new extraction work.
+
+## Stage 3 — Deep memory — planned, not yet implemented
+
+Stage 3 is the remaining major layer. It will use identity, organization,
+project hints, semantic-cluster context, and the original source transcript to
+extract and consolidate durable memory.
+
+It will cover:
+
+- project/system state;
+- decisions and reasons;
+- errors and failed approaches;
+- confirmed solutions with explicit success evidence;
+- configuration and workflows;
+- lessons and durable facts;
+- temporal state and supersession;
+- conservative deduplication;
+- contradiction/review handling;
+- per-identity project dossiers;
+- integration with durable-memory search.
+
+The implementation plan is maintained in:
+
+```text
+docs/CHATGPT_MEMORY_STAGE3_PLAN.md
+```
+
+## Retrieval model
+
+The intended retrieval ladder is:
+
+1. consolidated current durable project memory;
+2. source-backed atomic knowledge items;
+3. semantic search across raw ChatGPT conversation and attachment chunks;
+4. original transcript or recovered asset for full source inspection.
+
+Semantic clusters are organizational context, not factual evidence. Durable
+claims must always point back to source conversations/evidence.
+
+## Safety and quality rules
+
+- Raw conversation/attachment content is untrusted input.
+- Source exports are never edited.
+- Identity namespaces are not silently mixed.
+- Assistant suggestions do not become successful fixes without source evidence
+  that they worked.
+- Contradictory facts are preserved and resolved explicitly rather than silently
+  overwritten.
+- Reruns must be idempotent for unchanged source material.
+- A changed conversation invalidates only derived memory that depends on it.
+- Generated Markdown is a rebuildable view of SQLite, not a second source of
+  truth.
