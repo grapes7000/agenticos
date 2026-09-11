@@ -1,0 +1,14 @@
+[agenticos]
+vault = "~/vault"
+data_dir = "~/.local/share/agenticos"
+ollama_url = "http://localhost:11434"
+model = "qwen2.5-coder:7b"
+dry_run = true
+
+[memory]
+database = "~/AgenticOS/chatgpt-memory/data/memory.sqlite3"
+output_dir = "~/AgenticOS/chatgpt-memory/memory"
+
+[scan]
+allowed_roots = ["~/Downloads", "~/Desktop", "~/Documents", "~/Projects"]
+blocked_terms = ["wallet", "seed", "mnemonic", "keystore", ".ssh", "password", "recovery", "secret"]

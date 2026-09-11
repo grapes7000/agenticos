@@ -2,13 +2,23 @@
 set -euo pipefail
 
 cd "$HOME/AgenticOS"
-export OBSIDIAN_VAULT="${OBSIDIAN_VAULT:-$HOME/vault}"
+if [[ -z "${OBSIDIAN_VAULT:-}" ]]; then
+  if [[ -d "$HOME/Documents/Obsidian Vault" ]]; then
+    export OBSIDIAN_VAULT="$HOME/Documents/Obsidian Vault"
+  else
+    export OBSIDIAN_VAULT="$HOME/vault"
+  fi
+fi
 export AGENTOS_HOME="${AGENTOS_HOME:-$HOME/AgenticOS}"
 export AGENTOS_MODEL="${AGENTOS_MODEL:-qwen2.5-coder:7b}"
 
-LEGACY_AGENTOS="/home/lakota/AgenticOS/bin/agentos.before-security-1782383713"
+LEGACY_AGENTOS="/home/lakota/AgenticOS/bin/agentos.before-security-1782383793"
 
 case "${1:-help}" in
+  homecoming|at-work|autonomy)
+    shift || true
+    exec "$HOME/AgenticOS/scripts/at_work_autonomy.sh" "$@"
+    ;;
   security)
     shift || true
     exec "$HOME/AgenticOS/bin/agentos-security" "$@"
@@ -29,6 +39,11 @@ case "${1:-help}" in
     if [[ -n "$LEGACY_AGENTOS" && -x "$LEGACY_AGENTOS" ]]; then
       "$LEGACY_AGENTOS" help || true
     fi
+    echo ""
+    echo "Autonomy commands:"
+    echo "  homecoming        Run read-only at-work autonomy loop and write Obsidian reports"
+    echo "  at-work           Alias for homecoming"
+    echo "  autonomy          Alias for homecoming"
     echo ""
     echo "Security/quality commands:"
     echo "  security          Collect a system security + health audit"

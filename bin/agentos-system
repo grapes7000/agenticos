@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -f "$HOME/AgenticOS/.agenticos.env" ]; then
+  source "$HOME/AgenticOS/.agenticos.env"
+fi
+exec python3 "$HOME/AgenticOS/agents/system_conductor.py" "$@"

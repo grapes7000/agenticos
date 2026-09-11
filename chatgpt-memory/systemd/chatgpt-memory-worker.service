@@ -1,0 +1,16 @@
+[Unit]
+Description=Resumable local ChatGPT memory import worker
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lakota/AgenticOS/chatgpt-memory
+Environment=OLLAMA_HOST=192.168.122.1:11434
+Environment=CHATGPT_MEMORY_MODEL=qwen2.5:7b-instruct
+ExecStart=/usr/bin/python3 /home/lakota/AgenticOS/chatgpt-memory/src/chatgpt_memory.py worker --root /home/lakota/AgenticOS/chatgpt-memory --export /home/lakota/Documents/mydata_chatgpt
+Restart=always
+RestartSec=15
+Nice=10
+
+[Install]
+WantedBy=default.target

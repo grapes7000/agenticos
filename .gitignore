@@ -30,6 +30,12 @@ data/handoffs/*.json
 *.sqlite
 *.sqlite3
 
+# Private ChatGPT exports and generated knowledge views
+chatgpt-memory/import/
+chatgpt-memory/memory/
+chatgpt-memory/data/
+chatgpt-memory/STATUS.md
+
 # Logs, generated run output, caches
 logs/
 *.log
@@ -41,6 +47,9 @@ logs/
 *.tgz
 *.zip
 .cache/
+
+# Generated dashboard
+dashboard/index.html
 
 # Generated reports / iterative run artifacts
 iterative-fixes/runs/
