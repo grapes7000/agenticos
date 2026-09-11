@@ -21,7 +21,9 @@ class Stage3RunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "memory.sqlite3"
             output = Path(tmp) / "memory"
-            queue_counts = iter([5, 2, 0])
+            # Each batch checks queued once before and once after processing.
+            # The final 0 is the loop-exit check.
+            queue_counts = iter([5, 2, 2, 0, 0])
 
             def fake_scalar(_db, sql):
                 if "state='failed'" in sql:
