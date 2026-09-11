@@ -2,7 +2,7 @@
 """Incremental ChatGPT export + attachment semantic index."""
 from __future__ import annotations
 
-import argparse, hashlib, json, mimetypes, os, re, shutil, sqlite3, subprocess, tempfile
+import argparse, hashlib, json, mimetypes, os, re, shutil, sqlite3, subprocess, tempfile, time
 import urllib.error, urllib.request, zipfile
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,7 @@ ASSET_VIEW = XDG / "chatgpt-assets"
 FILE_ID = re.compile(r"\bfile[-_]([A-Za-z0-9]{8,})\b", re.I)
 MAX_TEXT = 2_000_000
 CONTENT_HASH_VERSION = "analysis-v1"
+TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 EXT = {
     "image/jpeg":".jpg","image/png":".png","image/gif":".gif","image/webp":".webp","image/heif":".heif",
     "application/pdf":".pdf","application/json":".json","application/zip":".zip",
@@ -102,20 +103,28 @@ def base_url(host: str):
     host=host.strip().rstrip("/"); return host if host.startswith(("http://","https://")) else "http://"+host
 
 
-def post_json(url,payload):
+def post_json(url,payload,attempts=4):
     req=urllib.request.Request(url,data=json.dumps(payload).encode(),headers={"Content-Type":"application/json"})
-    with urllib.request.urlopen(req,timeout=90) as r: return json.loads(r.read().decode())
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(req,timeout=90) as r: return json.loads(r.read().decode())
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+            code=getattr(e,"code",None)
+            transient=code in TRANSIENT_HTTP_CODES or code is None
+            if not transient or attempt+1>=attempts: raise
+            time.sleep(min(2**attempt,8))
+    raise RuntimeError("unreachable")
 
 
 def embed(text,model=EMBED_MODEL,host=OLLAMA_HOST):
     base=base_url(host); sample=text[:8000]
     try:
-        data=post_json(base+"/api/embeddings",{"model":model,"prompt":sample})
-        if data.get("embedding"): return data["embedding"]
+        data=post_json(base+"/api/embed",{"model":model,"input":sample,"truncate":True}); values=data.get("embeddings") or []
+        if values and isinstance(values[0],list): return values[0]
     except urllib.error.HTTPError as e:
         if e.code not in {404,405}: raise
-    data=post_json(base+"/api/embed",{"model":model,"input":sample}); values=data.get("embeddings") or []
-    if values and isinstance(values[0],list): return values[0]
+    data=post_json(base+"/api/embeddings",{"model":model,"prompt":sample})
+    if data.get("embedding"): return data["embedding"]
     raise RuntimeError(f"no embedding returned for {model}")
 
 
