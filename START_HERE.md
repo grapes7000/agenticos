@@ -1,182 +1,97 @@
 # START HERE
 
-AgenticOS uses a checkpoint workflow designed around small local-AI coding slices and human-controlled testing/Git.
+AgenticOS has moved beyond the original bootstrap-checkpoint phase. The current
+repository contains a supported Python core plus a substantial private ChatGPT
+archive/memory subsystem.
 
-## The development rule
+## Read these first
 
-**Qwen writes tiny tasks. Complete a whole checkpoint. Then ChatGPT reviews and explains the checkpoint before the next one begins.**
+For current work:
 
-Qwen is being used here as proof of working local code generation, not as a repository agent. You should not need to upload the repo, planning docs, or source tree to it for these early tasks. Ask ChatGPT for a self-contained Qwen prompt for the next task; that prompt should include the exact interfaces and context Qwen needs.
+1. `README.md`
+2. `docs/CURRENT_STATE.md`
+3. `docs/ACTIVE_TASK.md`
+4. `docs/ARCHITECTURE.md`
+5. `docs/CHATGPT_MEMORY_PLAN.md`
+6. `docs/CHATGPT_MEMORY_STAGE3_PLAN.md`
+7. `chatgpt-memory/PIPELINE.md`
 
-## Initial setup
+The original `TASKS.md` and numbered early planning documents are historical
+context. They should not override `CURRENT_STATE.md` or `ACTIVE_TASK.md`.
 
-Clone and enter the repo:
+## Current ChatGPT-memory workflow
 
-```bash
-git clone <AGENTICOS-REPO-URL>
-cd agenticos
-```
-
-Read:
-
-- `README.md`
-- `docs/01_PROJECT_BRIEF.md`
-- `docs/03_ARCHITECTURE.md`
-- `TASKS.md`
-
-Checkpoint 1 is already selected. `docs/ACTIVE_TASK.md` points at the first slice.
-
-## For each lettered task
-
-### 1. Ask ChatGPT for the Qwen prompt
-
-Example request:
+The implemented pipeline is:
 
 ```text
-Give me the self-contained Qwen prompt for BUILD-001A.
+Stage 0  archive + attachments + embeddings
+Stage 1  identity routing
+Stage 2  summaries/tags/projects/type/importance
+Stage 2B PCA -> UMAP -> DBSCAN + cluster labels/subclusters
+Stage 3  durable deep memory (next build)
 ```
 
-The prompt should tell Qwen:
-
-- exactly what to implement;
-- exact file path(s);
-- required public interfaces;
-- allowed dependencies;
-- behaviors and edge cases;
-- what not to implement yet;
-- tests or proof command expected;
-- delivery format so code can be copied directly.
-
-Do not make Qwen infer the architecture from missing repository files.
-
-### 2. Give only that prompt to Qwen
-
-Qwen should normally return one complete small file or a very small set of files. It does not need repo access for the first five checkpoints.
-
-If Qwen tries to expand scope, ignore the extra work and keep only the requested slice.
-
-### 3. Paste the code into the exact path
-
-Do not create alternate copies such as `network_new.py`, `final.py`, or `fixed2.py`.
-
-### 4. Run the task-specific proof
-
-Use the command included in the prompt. Typical commands will eventually include:
+Set up and resume the implemented stages with:
 
 ```bash
-python -m pytest -q
-agent --help
-agent status
-agent network
-```
-
-Keep exact failures. Do not paraphrase terminal errors before asking for help.
-
-### 5. Fix only that task if needed
-
-For a straightforward bug, give Qwen the exact failure plus the current relevant code, or ask ChatGPT for a bounded repair prompt.
-
-Do not move to the next lettered task until the current slice's proof passes.
-
-### 6. Commit the small slice
-
-Recommended flow:
-
-```bash
-git status
-git diff
-python -m pytest -q
-git add <intended-files>
-git diff --cached
-git commit -m "build: complete BUILD-001A"
-```
-
-You may keep all tasks for one checkpoint on the same checkpoint branch if that is easier to follow.
-
-## Recommended branch model
-
-One branch per checkpoint is less annoying than one branch per tiny Qwen slice:
-
-```bash
-git switch main
+cd ~/AgenticOS
+git switch fix/chatgpt-archive-hardening
 git pull --ff-only
-git switch -c build/checkpoint-1-core
+bash bin/agentos-chatgpt-pipeline setup
+OLLAMA_HOST=100.91.175.25:11434 agentos-chatgpt-pipeline start
 ```
 
-Commit each lettered task separately so regressions are easy to understand.
-
-## When the checkpoint is complete
-
-Do not start the next checkpoint yet.
-
-Run the checkpoint proof and gather:
+Useful runtime commands:
 
 ```bash
-git status
-git diff main...HEAD
-python -m pytest -q
+agentos-chatgpt-pipeline status
+agentos-chatgpt-pipeline logs
+agentos-chatgpt-pipeline attach
+agentos-chatgpt-pipeline stop
 ```
 
-plus the real user-facing command for that checkpoint, such as:
+## Current development task
 
-```bash
-agent status
-```
-
-Then ask ChatGPT to review the **completed checkpoint**. ChatGPT should:
-
-1. review correctness and architecture;
-2. catch bugs and brittle parsing;
-3. compare the implementation with checkpoint acceptance criteria;
-4. explain the important Python/Linux code in plain language;
-5. identify only necessary fixes;
-6. tell you when the checkpoint is safe to merge and advance.
-
-After fixes pass, merge the checkpoint and update project state.
-
-## Checkpoint order
+The next implementation slice is:
 
 ```text
-1  core + agent status
-2  network + VPN/Mullvad intelligence
-3  local system health
-4  Docker/self-hosting diagnostics
-5  Ollama/local-AI diagnostics
-6  development environment
-7  homelab
-8  explicit actions
-9  guided troubleshooting / optional AI explanation
-10 configuration + JSON/completion
-11 CLI v1.0 hardening
-→ TUI / Qt GUI
-→ daily-use discovery loop
+CHATGPT-MEMORY-3.1 — Stage-3 schema and resumable extraction queue
 ```
 
-## Important boundaries for Checkpoints 1–5
+See `docs/ACTIVE_TASK.md` for the bounded task and
+`docs/CHATGPT_MEMORY_STAGE3_PLAN.md` for the full Stage-3 sequence.
 
-- checks are read-only;
-- no `sudo`;
-- no automatic fixes;
-- no service/container restarts;
-- no package installation;
-- no daemon;
-- no TUI/Qt yet;
-- no LLM deciding factual system state;
-- no giant plugin/framework abstraction.
+Do not jump directly to the deep LLM extractor. First make queue state,
+idempotency, source-change invalidation, priority ordering, and resume behavior
+reliable and tested.
 
-## The loop to remember
+## Development rule
+
+Keep changes small enough to review and prove. For each slice:
 
 ```text
-pick lettered task
-→ get self-contained Qwen prompt
-→ Qwen writes small slice
-→ paste exact file(s)
-→ run proof/tests
-→ bounded fix if necessary
-→ commit slice
-→ next lettered task
-→ finish checkpoint
-→ ChatGPT reviews + teaches checkpoint
-→ fix/check/merge
-→ next checkpoint
+read current task
+-> implement only that slice
+-> add focused tests
+-> run proof/tests
+-> inspect diff
+-> commit
+-> review architecture before advancing
 ```
+
+Preserve these memory-system boundaries:
+
+- SQLite is canonical;
+- raw exports are read-only;
+- raw conversation/attachment content is untrusted;
+- identity namespaces do not silently mix;
+- semantic clusters are grouping context, not factual evidence;
+- durable claims require source provenance;
+- assistant suggestions are not confirmed solutions without source evidence;
+- old/historical state is retained when a newer state supersedes it.
+
+## Historical checkpoint workflow
+
+The original small-Qwen checkpoint plan is still retained in `TASKS.md` and the
+numbered planning docs for reference. It describes how AgenticOS was initially
+bootstrapped, but it is no longer the current entry point for repository work.
