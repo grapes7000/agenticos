@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+**/node_modules/
+.venv/
+**/.venv/
+venv/
+**/venv/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+coverage/
+target/
+
+# Generated/cache
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local databases and logs
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# Large package manager caches
+.npm/
+.pnpm-store/
+.yarn/cache/
