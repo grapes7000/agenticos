@@ -1,7 +1,7 @@
 # ChatGPT Memory System
 
 Safe local archive, attachment recovery, identity routing, organization,
-semantic discovery, and planned deep memory for ChatGPT exports.
+semantic discovery, and source-backed durable memory for ChatGPT exports.
 
 ## Safety boundaries
 
@@ -18,6 +18,8 @@ semantic discovery, and planned deep memory for ChatGPT exports.
   extraction.
 - Brooke, Lakota, shared, and unknown material remain separate namespaces.
 - Semantic clusters are organizational context, not factual evidence.
+- Atomic source-backed facts are preserved even when later consolidation groups,
+  supersedes, suppresses, or disputes them.
 - Nothing automatically writes extracted archive facts into Hermes persistent
   memory.
 
@@ -30,21 +32,21 @@ Stage 0  archive import + attachments + embeddings
 Stage 1  identity routing
 Stage 2  summaries/tags/projects/type/importance
 Stage 2B PCA -> UMAP -> DBSCAN semantic discovery + cluster labels
-Stage 3  deep durable memory (planned; not yet implemented)
+Stage 3  source-backed durable deep memory
 ```
 
-Run/resume Stages 0–2B with:
+Run/resume the complete pipeline with:
 
 ```bash
 agentos-chatgpt-pipeline start
 ```
 
-See `PIPELINE.md` for setup and runtime commands and
-`../docs/CHATGPT_MEMORY_STAGE3_PLAN.md` for the Stage-3 design.
+See `PIPELINE.md` for setup/runtime commands and
+`../docs/CHATGPT_MEMORY_STAGE3_PLAN.md` for the Stage-3 design contract.
 
 ## Stage 0 — Archive and attachment indexing
 
-The importer handles both conversations and exported files:
+The importer handles conversations and exported files:
 
 - conversations are flattened using the active conversation branch, chunked on
   message/turn boundaries, and embedded with `AGENTOS_EMBED_MODEL` (default
@@ -68,22 +70,9 @@ agentos-chatgpt-import ~/Downloads/chatgpt-export.zip
 agentos-chatgpt-import ~/Documents/mydata_chatgpt
 ```
 
-Useful direct importer commands:
-
-```bash
-cd ~/AgenticOS/chatgpt-memory
-python3 src/chatgpt_archive.py status
-python3 src/chatgpt_archive.py import ~/Downloads/chatgpt-export.zip
-python3 src/chatgpt_archive.py import ~/Documents/mydata_chatgpt --no-embeddings
-```
-
-The importer honors:
-
-- `OLLAMA_HOST` — Ollama base URL, with or without `http://`;
-- `AGENTOS_EMBED_MODEL` — embedding model, default `nomic-embed-text`.
-
-The modern `/api/embed` endpoint is preferred with truncation enabled; legacy
-`/api/embeddings` is retained as a compatibility fallback.
+The importer honors `OLLAMA_HOST` and `AGENTOS_EMBED_MODEL`. The modern
+`/api/embed` endpoint is preferred with truncation enabled; legacy
+`/api/embeddings` remains a compatibility fallback.
 
 ## Stage 1 — Identity routing
 
@@ -98,15 +87,12 @@ UNKNOWN
 ```
 
 The first phase uses deterministic signals. Ambiguous conversations are sent to
-a local Ollama model. A decisive recheck mode can be used for conversations
-that were previously left unknown.
-
-Identity routing does not mark a conversation as fully analyzed and does not
-extract durable memories.
+a local Ollama model. Identity routing does not mark a conversation as fully
+analyzed and does not extract durable memory.
 
 ## Stage 2 — Lightweight organization
 
-`src/organize_fast.py` consumes the resolved identity and stores, separately:
+`src/organize_fast.py` consumes the resolved identity and stores:
 
 - one-sentence summary;
 - tags;
@@ -118,18 +104,9 @@ It never re-decides identity and does not perform deep fact extraction.
 
 ## Stage 2B — Semantic discovery
 
-`src/semantic_cluster.py` reads the existing `chat_chunks.embedding_json` values
-directly from SQLite.
-
-For each conversation it:
-
-1. normalizes each chunk vector;
-2. mean-pools all chunks in that conversation;
-3. normalizes the resulting conversation vector;
-4. applies PCA;
-5. applies UMAP in a higher-dimensional clustering representation;
-6. runs DBSCAN in that representation;
-7. builds a separate 2-D UMAP only for visualization/export.
+`src/semantic_cluster.py` reads existing `chat_chunks.embedding_json` values
+directly from SQLite and builds one normalized vector per conversation before
+PCA -> UMAP -> DBSCAN. A separate 2-D UMAP is generated only for visualization.
 
 `src/label_semantic_clusters.py` labels discovered clusters using representative
 Stage-2 summaries. Oversized Stage-2 categories can be clustered independently
@@ -143,37 +120,101 @@ conversation_reductions
 semantic_clusters
 ```
 
-They can also be exported as CSV without making CSV the source of truth.
+## Stage 3 — Durable deep memory
 
-## Unified semantic search
+### Extraction foundation
 
-`agentos-memory-search` searches Obsidian memory, ChatGPT conversation chunks,
-and recovered attachment chunks together using keyword + cosine-similarity
-ranking.
+`src/deep_memory.py` implements Stages 3.1-3.4:
+
+- priority/resumable passage queue;
+- turn-aware passage construction with stable message refs;
+- strict structured local-model extraction;
+- source-backed `knowledge_items`;
+- many-to-many project routing;
+- `knowledge_evidence` provenance;
+- assistant-only claim blocking;
+- explicit user success confirmation for `confirmed_solution`;
+- error -> failed attempt -> confirmed solution chains;
+- decision -> decision reason relations.
+
+### Consolidation and temporal state
+
+`src/deep_memory_finalize.py` implements Stages 3.5-3.7:
+
+- conservative duplicate groups without deleting atomic facts;
+- explicit current/historical/superseded handling;
+- deterministic `supersedes` relations when the source already establishes the
+  temporal transition;
+- `knowledge_conflicts` for competing state claims;
+- `knowledge_review_queue` for ambiguous/blocked material;
+- durable `knowledge_overrides` for user corrections;
+- cluster-aware project snapshots;
+- generated namespace/project Markdown views.
+
+Important tables include:
+
+```text
+deep_memory_runs
+deep_memory_extractions
+deep_memory_candidates
+knowledge_items
+knowledge_item_projects
+knowledge_evidence
+knowledge_relations
+knowledge_groups
+knowledge_group_members
+knowledge_conflicts
+knowledge_review_queue
+knowledge_overrides
+project_memory_snapshots
+```
+
+### Full Stage-3 runner
+
+`src/run_stage3.py` resumes all Stage-3 work in bounded batches, then finalizes
+and renders the successful results. The main `agentos-chatgpt-pipeline` invokes
+this runner automatically after Stage-2B clustering.
+
+Generated views live under:
+
+```text
+chatgpt-memory/memory/<namespace>/projects/<project>/
+```
+
+They are disposable/rebuildable views of SQLite, not the canonical memory.
+
+## Unified memory search
+
+`agentos-memory-search` now searches consolidated durable knowledge by default,
+then raw ChatGPT chunks, recovered attachment chunks, and Obsidian memory.
+Durable canonical facts receive priority when they directly match the query;
+raw semantic recall remains available for source inspection.
 
 ```bash
 agentos-memory-search "vpn problem that broke ssh"
+agentos-memory-search --durable "AgenticOS database path"
 agentos-memory-search --chatgpt "tailscale mullvad remote access"
 agentos-memory-search --assets "pink desktop screenshot"
 agentos-memory-search --obsidian "AgenticOS architecture"
-agentos-memory-search --chatgpt --assets "wacom configuration script"
 ```
 
-Search results retain conversation IDs, message ranges, asset IDs, MIME types,
-and source/recovered paths so results can be traced to the original archive.
+The preferred retrieval ladder is:
 
-## Project/knowledge index foundation
+1. consolidated current durable project memory;
+2. source-backed atomic knowledge items;
+3. semantic ChatGPT/attachment/Obsidian recall;
+4. original transcript or recovered asset when full evidence is needed.
 
-`src/knowledge_index.py` provides the durable project/index foundation that
-Stage 3 will extend:
+## Project/knowledge foundation
+
+`src/knowledge_index.py` remains the durable project/index foundation:
 
 - `projects`;
 - `conversation_projects`;
 - `knowledge_items`;
-- FTS5 search over source-backed project knowledge;
-- rebuildable Markdown project dossiers.
+- FTS5 search over source-backed project knowledge.
 
-Legacy `deep_facts` and `project_facts` can be normalized into this index.
+Legacy `deep_facts` and `project_facts` remain migration inputs.
 
 ## Legacy deep extractors
 
@@ -184,23 +225,5 @@ python3 src/chatgpt_memory.py deepen --limit 100
 python3 src/chatgpt_memory.py expand-projects
 ```
 
-These remain useful for inspecting/migrating previous work, but they are **not
-the preferred design for new deep-memory extraction**. Stage 3 will replace the
-monolithic flow with a source-backed, resumable passage-level pipeline that
-uses the identity, organization, and semantic-cluster context already produced
-by Stages 1–2B.
-
-## Planned Stage 3 retrieval ladder
-
-The target retrieval order is:
-
-1. consolidated current durable project memory;
-2. source-backed atomic knowledge items;
-3. semantic search across ChatGPT/attachment chunks and Obsidian memory;
-4. original transcript or recovered asset when full evidence is needed.
-
-Full plan:
-
-```text
-../docs/CHATGPT_MEMORY_STAGE3_PLAN.md
-```
+These remain useful for inspecting/migrating previous work, but they are not the
+preferred architecture for new deep-memory extraction.
