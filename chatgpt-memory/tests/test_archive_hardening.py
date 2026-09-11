@@ -168,6 +168,70 @@ class ArchiveHardeningTests(unittest.TestCase):
             with sqlite3.connect(db) as con:
                 self.assertEqual(con.execute("SELECT count(*) FROM asset_references").fetchone()[0], 1)
 
+    def test_chat_chunk_hash_can_move_to_another_index_without_unique_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "export"
+            source.mkdir()
+            db = root / "memory.sqlite3"
+            (source / "conversations-000.json").write_text(json.dumps([conversation("hello")]))
+            ingest_conversations(db, source)
+
+            with patch("chatgpt_archive.embed", return_value=[1.0, 0.0]):
+                index_conversation_embeddings(db, model="model-a")
+
+            with sqlite3.connect(db) as con:
+                before = con.execute(
+                    "SELECT chunk_hash,embedding_json,embedding_model FROM chat_chunks WHERE chunk_index=0"
+                ).fetchone()
+                con.execute("UPDATE chat_chunks SET chunk_index=99 WHERE chunk_index=0")
+
+            result = index_conversation_embeddings(db, model="model-b", do_embed=False)
+            self.assertGreater(result["reused"], 0)
+
+            with sqlite3.connect(db) as con:
+                after = con.execute(
+                    "SELECT chunk_hash,embedding_json,embedding_model FROM chat_chunks WHERE chunk_index=0"
+                ).fetchone()
+                stale = con.execute("SELECT count(*) FROM chat_chunks WHERE chunk_index=99").fetchone()[0]
+            self.assertEqual(after, before)
+            self.assertEqual(stale, 0)
+
+    def test_asset_chunk_hash_can_move_to_another_index_without_unique_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "export"
+            source.mkdir()
+            db = root / "memory.sqlite3"
+            aid = "0123456789abcdef0123456789abcdef"
+            (source / "conversations-000.json").write_text(
+                json.dumps([conversation("image context", [aid])])
+            )
+            (source / f"file_{aid}.dat").write_bytes(b"\x89PNG\r\n\x1a\n" + b"payload")
+            ingest_conversations(db, source)
+            index_assets(db, source)
+            link_asset_references(db)
+
+            with patch("chatgpt_archive.embed", return_value=[0.5, 0.5]):
+                index_asset_embeddings(db, model="model-a")
+
+            with sqlite3.connect(db) as con:
+                before = con.execute(
+                    "SELECT chunk_hash,embedding_json,embedding_model FROM asset_chunks WHERE chunk_index=0"
+                ).fetchone()
+                con.execute("UPDATE asset_chunks SET chunk_index=99 WHERE chunk_index=0")
+
+            result = index_asset_embeddings(db, model="model-b", do_embed=False)
+            self.assertGreater(result["reused"], 0)
+
+            with sqlite3.connect(db) as con:
+                after = con.execute(
+                    "SELECT chunk_hash,embedding_json,embedding_model FROM asset_chunks WHERE chunk_index=0"
+                ).fetchone()
+                stale = con.execute("SELECT count(*) FROM asset_chunks WHERE chunk_index=99").fetchone()[0]
+            self.assertEqual(after, before)
+            self.assertEqual(stale, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
