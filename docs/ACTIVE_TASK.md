@@ -1,102 +1,105 @@
 # Active Task
 
-## CHATGPT-MEMORY-3.1–3.4 — Deep-memory extraction foundation
+## CHATGPT-MEMORY-3.5–3.8 — Deep-memory consolidation and integration
 
 **Area:** ChatGPT memory pipeline
 
-**Status:** IMPLEMENTED — awaiting local test run/review before Stage 3.5
+**Status:** IMPLEMENTED — awaiting local regression run before real full extraction
 
 ## Completed scope
 
-Stages 3.1 through 3.4 are implemented in `chatgpt-memory/src/deep_memory.py`.
+### 3.5 — Deduplication, temporal state, conflicts, review
 
-### 3.1 — Schema and resumable queue
+Implemented in `chatgpt-memory/src/deep_memory_finalize.py`:
 
-Implemented:
+- conservative duplicate grouping over immutable atomic `knowledge_items`;
+- no deletion/rewrite of source-backed evidence during consolidation;
+- effective temporal status with explicit user override support;
+- deterministic `supersedes` links only when explicit current versus
+  historical/superseded evidence exists;
+- potential current-state contradictions stored in `knowledge_conflicts`;
+- ambiguous conflicts and blocked candidates added to `knowledge_review_queue`;
+- durable corrections stored in `knowledge_overrides`;
+- suppression and forced-status overrides affect generated consolidation views,
+  not the original atomic facts.
 
-- `deep_memory_runs` and passage-level `deep_memory_extractions`;
-- queue priority from Stage-2 importance, project membership, conversation type,
-  global semantic-cluster membership/representatives, recency, and attachment
-  references;
-- content-hash/passage-hash reuse for unchanged work;
-- selective invalidation for changed passages/conversations;
-- interrupted `processing` rows reset to resumable `queued` state;
-- retry handling and status output.
-
-### 3.2 — Structured passage extractor
-
-Implemented:
-
-- bounded turn-aware passages with small overlap;
-- stable message refs such as `u0001` and `a0002` for provenance;
-- strict Ollama JSON schema;
-- retry/timeout behavior;
-- atomic memory categories from the Stage-3 plan;
-- evidence refs and explicit success-evidence refs;
-- no cross-conversation consolidation.
-
-### 3.3 — Project routing and knowledge writer
+### 3.6 — Project and semantic-cluster consolidation
 
 Implemented:
 
-- Stage-2 project hints combined with passage-level project hints;
-- many-to-many conversation/project routing;
-- many-to-many knowledge-item/project routing;
-- source-backed writes into the existing `knowledge_items` foundation;
-- namespace preservation (`lakota`, `brooke`, `shared`, `unknown`);
-- dedicated `knowledge_evidence` records with passage/message provenance;
-- Stage-3 origin marking without rewriting legacy knowledge.
+- canonical `knowledge_groups` and `knowledge_group_members`;
+- per-project/per-namespace consolidation only;
+- source evidence from every grouped member retained;
+- latest global semantic cluster membership/labels attached as context;
+- cluster context contributes to project snapshots but never establishes truth;
+- `project_memory_snapshots` stores rebuildable current state, decisions,
+  configuration, errors/fixes, workflows, history, conflicts, and cluster
+  context.
 
-### 3.4 — Relations, success confirmation, and error chains
+### 3.7 — Markdown and search integration
 
 Implemented:
 
-- assistant-only claims are retained as blocked candidates rather than promoted;
-- `confirmed_solution` requires user-authored success evidence;
-- failed approaches remain distinct from confirmed solutions;
-- deterministic within-conversation links:
-  - `error -> failed_approach`;
-  - `error -> confirmed_solution`;
-  - `decision -> decision_reason`;
-- `knowledge_relations` stores the chains without deleting source items.
+- generated project views under `chatgpt-memory/memory/<namespace>/projects/`;
+- `README.md`, `CURRENT_STATE.md`, `DECISIONS.md`, `CONFIGURATION.md`,
+  `ERRORS_AND_FIXES.md`, `WORKFLOWS.md`, `HISTORY.md`, and `CONFLICTS.md`;
+- source references use `chatgpt://conversation/...` provenance identifiers;
+- `tools/search_memory.py` now loads consolidated durable groups by default;
+- durable knowledge receives retrieval priority for real keyword matches;
+- raw ChatGPT chunks, attachments, and Obsidian remain available for semantic
+  recall and source inspection;
+- `--durable` can restrict search to consolidated durable knowledge.
 
-## CLI
+### 3.8 — Main pipeline integration
 
-Standalone command:
+Implemented:
 
-```bash
-agentos-chatgpt-deep-memory queue
-agentos-chatgpt-deep-memory extract --limit 25
-agentos-chatgpt-deep-memory write
-agentos-chatgpt-deep-memory link
-agentos-chatgpt-deep-memory status
-```
+- `chatgpt-memory/src/run_stage3.py` runs/resumes the complete Stage-3 sequence;
+- it builds/reuses the queue, processes bounded LLM batches, writes atomic
+  knowledge, links relations, and runs finalization/rendering;
+- repeated runs reuse completed unchanged passages;
+- the runner stops if multiple batches make no queue progress rather than
+  spinning forever;
+- `bin/agentos-chatgpt-pipeline` now invokes Stage 3 after Stage-2B clustering;
+- `agentos-chatgpt-pipeline status` exposes deep queue and snapshot state.
 
-`process` combines extract + write + link for one resumable batch, but Stage 3
-is intentionally **not** wired into the main `agentos-chatgpt-pipeline` yet;
-that remains Stage 3.8.
-
-## Tests
-
-Focused tests are in:
+## Canonical Stage-3 tables
 
 ```text
-chatgpt-memory/tests/test_deep_memory_stage3.py
+deep_memory_runs
+deep_memory_extractions
+deep_memory_candidates
+knowledge_items
+knowledge_item_projects
+knowledge_evidence
+knowledge_relations
+knowledge_groups
+knowledge_group_members
+knowledge_conflicts
+knowledge_review_queue
+knowledge_overrides
+project_memory_snapshots
 ```
 
-They cover queue reuse/invalidation, passage overlap/message refs, solution
-confirmation gating, namespace/provenance, many-to-many projects, and
-error/attempt/solution chains.
+## Regression tests
 
-The assistant execution environment could not reach GitHub to clone and execute
-the branch tests, so the next review step is a local test run in the actual
-AgenticOS checkout.
+Run locally:
+
+```bash
+python3 -m unittest \
+  chatgpt-memory/tests/test_deep_memory_stage3.py \
+  chatgpt-memory/tests/test_deep_memory_queue.py \
+  chatgpt-memory/tests/test_deep_memory_finalize.py \
+  chatgpt-memory/tests/test_durable_search.py -v
+```
+
+The new tests cover duplicate grouping, semantic-cluster context, state
+conflicts, supersession, durable overrides, snapshots/Markdown rendering, and
+durable search in addition to the 3.1–3.4 tests.
 
 ## Review boundary
 
-**Stop here. Do not begin Stage 3.5 yet.**
-
-After the local tests pass, review schema compatibility, queue behavior,
-provenance, success-confirmation rules, and relation quality. Stage 3.5 will
-then add conservative deduplication, temporal state, conflicts, and review
-queues.
+Do not redesign Stage 3 before the regression suite passes locally. Once it
+passes, run the real pipeline through tmux and inspect early extraction batches,
+blocked candidates, open conflicts, and rendered project memory before treating
+the generated durable memory as trusted day-to-day context.
