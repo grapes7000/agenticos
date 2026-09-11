@@ -233,12 +233,17 @@ def index_chats(db,model=EMBED_MODEL,host=OLLAMA_HOST,do_embed=True):
             for idx,start,end,text in parts:
                 h=hashlib.sha256(f"{row['conversation_id']}\0{start}\0{end}\0{text}".encode()).hexdigest()
                 old=c.execute("SELECT chunk_hash,embedding_json,embedding_model FROM chat_chunks WHERE conversation_id=? AND chunk_index=?",(row["conversation_id"],idx)).fetchone()
+                by_hash=c.execute("SELECT conversation_id,chunk_index,embedding_json,embedding_model FROM chat_chunks WHERE chunk_hash=?",(h,)).fetchone()
                 emb=None; stored_model=None
-                if old and old["chunk_hash"]==h and old["embedding_json"]:
-                    if old["embedding_model"]==model or not do_embed:
-                        emb=old["embedding_json"]; stored_model=old["embedding_model"]; m["reused"]+=1
+                source=None
+                if old and old["chunk_hash"]==h: source=old
+                elif by_hash: source=by_hash
+                if source and source["embedding_json"] and (source["embedding_model"]==model or not do_embed):
+                    emb=source["embedding_json"]; stored_model=source["embedding_model"]; m["reused"]+=1
                 if emb is None and do_embed:
                     emb=json.dumps(embed(text,model,host)); stored_model=model; m["embedded"]+=1
+                if by_hash and (by_hash["conversation_id"]!=row["conversation_id"] or by_hash["chunk_index"]!=idx):
+                    c.execute("DELETE FROM chat_chunks WHERE chunk_hash=?",(h,))
                 c.execute("""INSERT INTO chat_chunks(conversation_id,chunk_index,start_message,end_message,chunk_text,embedding_json,embedding_model,chunk_hash,updated_at)
                              VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(conversation_id,chunk_index) DO UPDATE SET start_message=excluded.start_message,end_message=excluded.end_message,
                              chunk_text=excluded.chunk_text,embedding_json=excluded.embedding_json,embedding_model=excluded.embedding_model,chunk_hash=excluded.chunk_hash,updated_at=excluded.updated_at""",
@@ -440,12 +445,17 @@ def index_asset_chunks(db,model=EMBED_MODEL,host=OLLAMA_HOST,do_embed=True):
             for idx,part in enumerate(parts):
                 h=hashlib.sha256(f"{a['asset_id']}\0{part}".encode()).hexdigest()
                 old=c.execute("SELECT chunk_hash,embedding_json,embedding_model FROM asset_chunks WHERE asset_id=? AND chunk_index=?",(a["asset_id"],idx)).fetchone()
+                by_hash=c.execute("SELECT asset_id,chunk_index,embedding_json,embedding_model FROM asset_chunks WHERE chunk_hash=?",(h,)).fetchone()
                 emb=None; stored_model=None
-                if old and old["chunk_hash"]==h and old["embedding_json"]:
-                    if old["embedding_model"]==model or not do_embed:
-                        emb=old["embedding_json"]; stored_model=old["embedding_model"]; m["reused"]+=1
+                source=None
+                if old and old["chunk_hash"]==h: source=old
+                elif by_hash: source=by_hash
+                if source and source["embedding_json"] and (source["embedding_model"]==model or not do_embed):
+                    emb=source["embedding_json"]; stored_model=source["embedding_model"]; m["reused"]+=1
                 if emb is None and do_embed and kind!="metadata":
                     emb=json.dumps(embed(part,model,host)); stored_model=model; m["embedded"]+=1
+                if by_hash and (by_hash["asset_id"]!=a["asset_id"] or by_hash["chunk_index"]!=idx):
+                    c.execute("DELETE FROM asset_chunks WHERE chunk_hash=?",(h,))
                 c.execute("""INSERT INTO asset_chunks(asset_id,chunk_index,chunk_text,content_kind,embedding_json,embedding_model,chunk_hash,updated_at) VALUES(?,?,?,?,?,?,?,?)
                              ON CONFLICT(asset_id,chunk_index) DO UPDATE SET chunk_text=excluded.chunk_text,content_kind=excluded.content_kind,embedding_json=excluded.embedding_json,
                              embedding_model=excluded.embedding_model,chunk_hash=excluded.chunk_hash,updated_at=excluded.updated_at""",(a["asset_id"],idx,part,kind,emb,stored_model,h,now())); m["chunks"]+=1
